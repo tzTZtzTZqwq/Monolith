@@ -1,4 +1,7 @@
 using Content.Server.Atmos.Components;
+using Content.Server._NSV.Bluespace.Sectors;
+using Content.Server._NSV.NPC.HTN;
+using Content.Server._NSV.NPC.Queries;
 using Content.Server.Destructible; // Mono
 using Content.Server.Fluids.EntitySystems;
 using Content.Server._Mono.NPC.HTN; // Mono
@@ -71,6 +74,7 @@ public sealed partial class NPCUtilitySystem : EntitySystem
     [Dependency] private GunSystem _gun = default!; // Mono
     [Dependency] private NPCCombatSystem _npcCombat = default!;
     [Dependency] private TurretTargetSettingsSystem _turretTargetSettings = default!;
+    [Dependency] private NsvBluespaceFactionSystem _nsvFactions = default!;
 
     private EntityQuery<PuddleComponent> _puddleQuery;
     private EntityQuery<TransformComponent> _xformQuery;
@@ -534,6 +538,30 @@ public sealed partial class NPCUtilitySystem : EntitySystem
                 {
                     entities.Add(ent);
                 }
+                break;
+            }
+            case NsvNearbyShipTargetsQuery nsvQuery:
+            {
+                var xform = Transform(owner);
+                var ownGrid = xform.GridUid;
+                foreach (var (target, targetComp) in _lookup.GetEntitiesInRange<NsvShipTargetComponent>(_transform.GetMapCoordinates(xform), nsvQuery.Range))
+                {
+                    var targetXform = Transform(target);
+                    var targetGrid = targetXform.GridUid;
+                    if (targetComp.NeedGrid != NsvShipTargetGridMode.Either &&
+                        (targetComp.NeedGrid == NsvShipTargetGridMode.OnGrid) == (targetGrid == null) ||
+                        targetGrid == ownGrid ||
+                        (_transform.GetWorldPosition(target) - _transform.GetWorldPosition(xform)).Length() > nsvQuery.Range ||
+                        targetComp.NeedPower && !this.IsPowered(target, EntityManager) ||
+                        targetGrid != null && _whitelistSystem.IsBlacklistPass(nsvQuery.Blacklist, targetGrid.Value) ||
+                        !_nsvFactions.IsHostile(owner, target))
+                    {
+                        continue;
+                    }
+
+                    entities.Add(target);
+                }
+
                 break;
             }
             // Mono - TODO: consider factions

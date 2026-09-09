@@ -1,0 +1,39 @@
+# NSV cargo playtest vessel: a copy of Spekter-G with the NSV cargo fit
+# (hub, buy/sell consoles, delivery machine, sell pallets) for in-game
+# cargo market testing. Free playtest ship; the grid appraises far above
+# the price, so it must never exist on servers with a real economy.
+
+- type: vessel
+  id: CargoTestSpekterG
+  parent: BaseVessel
+  name: Spekter-G (cargo test)
+  description: A copy of the NSV cargo playtest Spekter-G with hub, cargo consoles and delivery machine installed. NSV cargo market testing variant.
+  price: 0
+  minPriceMarkup: 0
+  category: Medium
+  group: Shipyard
+  shuttlePath: /SharedMaps/_NSV/Bluespace/cargotestspekterg.yml
+  guidebookPage: null
+  class:
+  - Pursuit
+  - Corvette
+  engine:
+  - NFR
+
+- type: gameMap
+  id: CargoTestSpekterG
+  mapName: 'Spekter-G (cargo test)'
+  mapPath: /SharedMaps/_NSV/Bluespace/cargotestspekterg.yml
+  minPlayers: 0
+  stations:
+    CargoTestSpekterG:
+      stationProto: StandardFrontierVessel
+      components:
+        - type: StationNameSetup
+          mapNameTemplate: 'Spekter-G CIV{1}'
+          nameGenerator:
+            !type:NanotrasenNameGenerator
+            prefixCreator: '14'
+        - type: StationJobs
+          availableJobs:
+            Contractor: [ 0, 0 ]

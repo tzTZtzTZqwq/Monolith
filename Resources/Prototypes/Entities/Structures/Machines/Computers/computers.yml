@@ -133,6 +133,8 @@
   - type: TargetSeekingTarget # Mono
   - type: ShipNpcTarget # Mono
     needPower: true
+  - type: NsvShipTarget #nsv
+    needPower: true
   - type: ShuttleConsoleLock
   - type: ActivatableUI
     key: enum.ShuttleConsoleUiKey.Key

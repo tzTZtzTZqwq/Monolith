@@ -1,0 +1,39 @@
+# NSV playtest vessel: Spekter-G pointing at the NSV bluespace spekter grid copy.
+# minPriceMarkup 0 deliberately relaxes the NoShipyardShipArbitrage guard for this
+# free playtest ship; the grid appraises at ~252551, so buying at 1 and scrapping
+# prints money on servers with a real economy.
+
+- type: vessel
+  id: SpekterG
+  parent: BaseVessel
+  name: Spekter-G
+  description: An averagely armored corvette with an armament focused on it's 3 torpedo mounts on both sides. NSV bluespace playtest variant.
+  price: 1
+  minPriceMarkup: 0
+  category: Medium
+  group: Shipyard
+  shuttlePath: /SharedMaps/_NSV/Bluespace/spekterg.yml
+  guidebookPage: null
+  class:
+  - Pursuit
+  - Corvette
+  engine:
+  - NFR
+
+- type: gameMap
+  id: SpekterG
+  mapName: 'Spekter-G'
+  mapPath: /SharedMaps/_NSV/Bluespace/spekterg.yml
+  minPlayers: 0
+  stations:
+    SpekterG:
+      stationProto: StandardFrontierVessel
+      components:
+        - type: StationNameSetup
+          mapNameTemplate: 'Spekter-G CIV{1}'
+          nameGenerator:
+            !type:NanotrasenNameGenerator
+            prefixCreator: '14'
+        - type: StationJobs
+          availableJobs:
+            Contractor: [ 0, 0 ]

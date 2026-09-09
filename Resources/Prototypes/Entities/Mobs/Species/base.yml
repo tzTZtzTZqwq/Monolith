@@ -235,6 +235,8 @@
   # Mono
   - type: ShipNpcTarget
     needGrid: NoGrid
+  - type: NsvShipTarget #nsv
+    needGrid: NoGrid
 
 - type: entity
   save: false

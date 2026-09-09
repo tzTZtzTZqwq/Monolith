@@ -332,3 +332,5 @@
   # Mono
   - type: ShipNpcTarget
     needGrid: NoGrid
+  - type: NsvShipTarget #nsv
+    needGrid: NoGrid

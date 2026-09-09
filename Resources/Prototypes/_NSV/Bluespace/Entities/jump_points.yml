@@ -1,0 +1,21 @@
+- type: entity
+  id: NSVBluespaceNavigationConsole
+  parent: BaseComputer
+  name: bluespace navigation console
+  description: Initiates jumps to configured bluespace sectors.
+  components:
+  - type: NsvBluespaceJumpPoint
+    starmapId: NSVBluespaceStrategicMap
+  - type: ActivatableUI
+    key: enum.NsvBluespaceNavigationConsoleUiKey.Key
+  - type: UserInterface
+    interfaces:
+      enum.NsvBluespaceNavigationConsoleUiKey.Key:
+        type: NsvBluespaceNavigationConsoleBoundUserInterface
+
+- type: entity
+  id: NSVBluespaceJumpPoint
+  parent: MarkerBase
+  components:
+  - type: NsvBluespaceJumpPoint
+    starmapId: NSVBluespaceStrategicMap

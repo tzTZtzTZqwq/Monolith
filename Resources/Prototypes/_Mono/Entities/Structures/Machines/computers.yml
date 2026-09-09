@@ -34,6 +34,8 @@
   - type: ActivatableUIRequiresAccess
   - type: ShipNpcTarget
     needPower: true
+  - type: NsvShipTarget #nsv
+    needPower: true
   - type: ActivatableUI
     key: enum.RoboticsConsoleUiKey.Key
   - type: UserInterface

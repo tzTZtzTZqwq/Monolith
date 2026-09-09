@@ -1,0 +1,18 @@
+- type: nsvBluespaceFaction
+  id: NSVNeutral
+
+- type: nsvBluespaceFaction
+  id: NSVHostile
+  relations:
+    NSVPlayer: Hostile
+    NSVFederal: Hostile
+
+- type: nsvBluespaceFaction
+  id: NSVFederal
+  relations:
+    NSVHostile: Hostile
+
+- type: nsvBluespaceFaction
+  id: NSVPlayer
+  relations:
+    NSVHostile: Hostile

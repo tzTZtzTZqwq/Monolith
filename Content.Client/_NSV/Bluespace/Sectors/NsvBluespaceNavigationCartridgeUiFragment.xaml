@@ -1,0 +1,33 @@
+<sectors:NsvBluespaceNavigationCartridgeUiFragment
+    xmlns:sectors="clr-namespace:Content.Client._NSV.Bluespace.Sectors"
+    xmlns="https://spacestation14.io"
+    Orientation="Vertical"
+    HorizontalExpand="True"
+    VerticalExpand="True">
+    <ScrollContainer HorizontalExpand="True" VerticalExpand="True" HScrollEnabled="False">
+        <BoxContainer Orientation="Vertical" HorizontalExpand="True" Margin="8">
+            <Label Text="{Loc 'nsv-bluespace-console-sector-header'}" StyleClasses="LabelHeading" HorizontalAlignment="Center"/>
+            <Label Name="SectorNameValue" Text="—" HorizontalAlignment="Center"/>
+            <GridContainer Columns="2" HorizontalExpand="True">
+                <Label Text="{Loc 'nsv-bluespace-console-caption-status'}" StyleClasses="LabelSubText"/>
+                <Label Name="SectorStatusValue" Text="—" HorizontalExpand="True" Align="Right"/>
+                <Label Text="{Loc 'nsv-bluespace-console-caption-assets'}" StyleClasses="LabelSubText"/>
+                <Label Name="SectorAssetsValue" Text="—" HorizontalExpand="True" Align="Right"/>
+            </GridContainer>
+            <Label Text="{Loc 'nsv-bluespace-console-encounter-header'}" StyleClasses="LabelHeading" HorizontalAlignment="Center" Margin="0 8 0 0"/>
+            <Label Name="EncounterNameValue" Text="—" HorizontalAlignment="Center"/>
+            <GridContainer Columns="2" HorizontalExpand="True">
+                <Label Text="{Loc 'nsv-bluespace-console-caption-objective'}" StyleClasses="LabelSubText"/>
+                <Label Name="EncounterObjectiveValue" Text="—" HorizontalExpand="True" Align="Right"/>
+                <Label Text="{Loc 'nsv-bluespace-console-caption-status'}" StyleClasses="LabelSubText"/>
+                <Label Name="EncounterStatusValue" Text="—" HorizontalExpand="True" Align="Right"/>
+                <Label Text="{Loc 'nsv-bluespace-console-caption-participants'}" StyleClasses="LabelSubText"/>
+                <Label Name="EncounterParticipantsValue" Text="—" HorizontalExpand="True" Align="Right"/>
+                <Label Text="{Loc 'nsv-bluespace-console-caption-role'}" StyleClasses="LabelSubText"/>
+                <Label Name="EncounterRoleValue" Text="—" HorizontalExpand="True" Align="Right"/>
+                <Label Text="{Loc 'nsv-bluespace-console-caption-extraction'}" StyleClasses="LabelSubText"/>
+                <Label Name="EncounterExtractionValue" Text="—" HorizontalExpand="True" Align="Right"/>
+            </GridContainer>
+        </BoxContainer>
+    </ScrollContainer>
+</sectors:NsvBluespaceNavigationCartridgeUiFragment>

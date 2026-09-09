@@ -1,0 +1,39 @@
+meta:
+  format: 7
+  category: Grid
+  engineVersion: 238.0.0
+  forkId: ""
+  forkVersion: ""
+  time: 12/22/2024 04:08:12
+  entityCount: 3
+maps: []
+grids:
+- 1
+orphans:
+- 1
+nullspace: []
+tilemap: {}
+entities:
+- proto: ""
+  entities:
+  - uid: 1
+    mapInit: true
+    components:
+    - type: MetaData
+      name: NSV relay station
+    - type: Transform
+    - type: MapGrid
+      chunks: {}
+    - type: Broadphase
+    - type: Physics
+      canCollide: False
+    - type: Fixtures
+      fixtures: {}
+    - type: MapSaveTileMap
+- proto: WallSolid
+  entities:
+  - uid: 2
+    mapInit: true
+    components:
+    - type: Transform
+      parent: 1

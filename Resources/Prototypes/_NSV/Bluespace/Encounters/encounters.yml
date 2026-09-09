@@ -1,0 +1,5 @@
+- type: nsvBluespaceEncounter
+  id: NSVPatrolContract
+  name: nsv-bluespace-encounter-patrol-name
+  objective: nsv-bluespace-encounter-patrol-objective
+  targetFaction: NSVHostile

@@ -296,6 +296,8 @@
     visualMultiplier: 0.75
   - type: ShipNpcTarget
     needGrid: NoGrid
+  - type: NsvShipTarget #nsv
+    needGrid: NoGrid
   - type: RetroMonitorView
   # </Mono>
 

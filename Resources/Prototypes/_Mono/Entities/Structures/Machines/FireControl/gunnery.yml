@@ -240,6 +240,8 @@
   - type: FireControlConsole
   - type: ShipNpcTarget
     needPower: true
+  - type: NsvShipTarget #nsv
+    needPower: true
   - type: TargetSeekingTarget
   - type: ActivatableUI
     key: enum.FireControlConsoleUiKey.Key

@@ -1,0 +1,107 @@
+- type: nsvBluespaceSectorModule
+  id: NSVBluespaceRelayStation
+  generator: !type:NsvBluespaceStationGeneratorDefinition
+    gridPath: /Maps/_Mono/POI/tsfmcoutpost.yml
+    faction: NSVNeutral
+  minCount: 1
+  maxCount: 1
+  footprintRadius: 96
+  minimumDistance: 96
+  required: true
+  maxPlacementAttempts: 60
+
+- type: nsvBluespaceSectorModule
+  id: NSVBluespacePatrolShip
+  generator: !type:NsvBluespaceShipGeneratorDefinition
+    gridPath: /SharedMaps/_NSV/Bluespace/gust.yml
+    faction: NSVHostile
+  minCount: 1
+  maxCount: 1
+  footprintRadius: 48
+  minimumDistance: 64
+  maxPlacementAttempts: 40
+
+- type: nsvBluespaceSectorModule
+  id: NSVBluespaceBroadsideShip
+  generator: !type:NsvBluespaceShipGeneratorDefinition
+    gridPath: /SharedMaps/_NSV/Bluespace/hunter.yml
+    faction: NSVHostile
+  minCount: 1
+  maxCount: 1
+  footprintRadius: 64
+  minimumDistance: 96
+  maxPlacementAttempts: 40
+
+- type: nsvBluespaceSectorModule
+  id: NSVBluespaceAsteroidField
+  generator: !type:NsvBluespaceAsteroidFieldGeneratorDefinition
+    radius: 56
+    density: 0.001
+    minimumSpacing: 16
+    maxSpawnAttempts: 24
+    asteroidTypes:
+    - prototype: AsteroidDebrisMedium
+      weight: 1
+  minCount: 4
+  maxCount: 6
+  footprintRadius: 56
+  minimumDistance: 64
+  maxPlacementAttempts: 40
+
+- type: nsvBluespaceSectorTemplate
+  id: NSVBluespaceTestSector
+  name: nsv-bluespace-sector-test-name
+  description: nsv-bluespace-sector-test-description
+  radius: 900
+  entrySafeRadius: 180
+  modules:
+  - NSVBluespaceRelayStation
+  - NSVBluespacePatrolShip
+  - NSVBluespaceAsteroidField
+
+- type: nsvBluespaceSectorTemplate
+  id: NSVBluespaceHunterSector
+  name: nsv-bluespace-sector-hunter-name
+  description: nsv-bluespace-sector-hunter-description
+  radius: 900
+  entrySafeRadius: 180
+  modules:
+  - NSVBluespaceBroadsideShip
+  - NSVBluespaceAsteroidField
+
+- type: nsvBluespaceSectorTemplate
+  id: NSVBluespaceHomeSector
+  name: nsv-bluespace-sector-home-name
+  description: nsv-bluespace-sector-home-description
+  radius: 700
+  entrySafeRadius: 180
+  modules:
+  - NSVBluespaceRelayStation
+
+- type: nsvBluespaceSectorTemplate
+  id: NSVBluespaceAsteroidSector
+  name: nsv-bluespace-sector-asteroid-name
+  description: nsv-bluespace-sector-asteroid-description
+  radius: 900
+  entrySafeRadius: 180
+  modules:
+  - NSVBluespaceAsteroidField
+
+- type: nsvBluespaceSectorTemplate
+  id: NSVBluespaceDistressSector
+  name: nsv-bluespace-sector-distress-name
+  description: nsv-bluespace-sector-distress-description
+  radius: 900
+  entrySafeRadius: 180
+  modules:
+  - NSVBluespaceRelayStation
+  - NSVBluespaceAsteroidField
+
+- type: nsvBluespaceSectorTemplate
+  id: NSVBluespaceUnknownSignalSector
+  name: nsv-bluespace-sector-unknown-name
+  description: nsv-bluespace-sector-unknown-description
+  radius: 900
+  entrySafeRadius: 180
+  modules:
+  - NSVBluespaceAsteroidField

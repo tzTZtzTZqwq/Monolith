@@ -1,0 +1,135 @@
+- type: utilityQuery
+  id: NsvBluespacePatrolTargets
+  query:
+  - !type:NsvNearbyShipTargetsQuery
+    blacklist:
+      tags:
+      - ShuttleAIIgnore
+  considerations:
+  - !type:TargetInverseDistanceCon
+    curve: !type:QuadraticCurve
+      slope: 1
+      exponent: 1
+      yOffset: 0
+      xOffset: 0
+  - !type:TargetIsAliveOrNACon
+    curve: !type:BoolCurve
+
+- type: htnCompound
+  id: NsvBluespacePatrolCompound
+  branches:
+  - tasks:
+    - !type:HTNPrimitiveTask
+      operator: !type:UtilityOperator
+        proto: NsvBluespacePatrolTargets
+    - !type:HTNCompoundTask
+      task: NsvBluespacePatrolAttackCompound
+
+- type: htnCompound
+  id: NsvBluespacePatrolAttackCompound
+  branches:
+  - preconditions:
+    - !type:KeyExistsPrecondition
+      key: TargetCoordinates
+    tasks:
+    - !type:HTNPrimitiveTask
+      operator: !type:ShipMoveToOperator
+        shutdownState: PlanFinished
+        removeKeyOnFinish: false
+        alwaysFaceTarget: true
+        inRangeMaxSpeed: 4
+        avoidProjectiles: true
+        range: 750
+        rangeTolerance: 150
+        targetKey: TargetCoordinates
+    - !type:HTNPrimitiveTask
+      operator: !type:ShipFireGunsOperator
+        shutdownState: TaskFinished
+        removeKeyOnFinish: false
+        leadingAccuracy: 0.6
+        targetKey: TargetCoordinates
+      services:
+      - !type:UtilityService
+        id: TargetsService
+        proto: NsvBluespacePatrolTargets
+        key: Target
+        coordinatesKey: TargetCoordinates
+
+- type: entity
+  id: NsvBluespacePatrolCoreSpawner
+  parent: SpawnMobAttackerCoreStaticSmart
+  components:
+  - type: ConditionalSpawner
+    prototypes:
+    - NsvBluespacePatrolCore
+
+- type: entity
+  id: NsvBluespacePatrolCore
+  parent: NpcStationAiAttackerStaticSmart
+  components:
+  - type: HTN
+    rootTask:
+      task: NsvBluespacePatrolCompound
+  - type: NsvBluespaceShipAiCore
+  - type: NsvShipTarget
+
+# Broadside variant: cloned from Mono's ShuttleAttackBroadsideCompound with the
+# faction-aware NsvBluespacePatrolTargets query swapped in for candidate selection.
+- type: htnCompound
+  id: NsvBluespaceBroadsideCompound
+  branches:
+  - tasks:
+    - !type:HTNPrimitiveTask
+      operator: !type:UtilityOperator
+        proto: NsvBluespacePatrolTargets
+    - !type:HTNCompoundTask
+      task: NsvBluespaceBroadsideAttackCompound
+
+- type: htnCompound
+  id: NsvBluespaceBroadsideAttackCompound
+  branches:
+  - preconditions:
+    - !type:KeyExistsPrecondition
+      key: TargetCoordinates
+    tasks:
+    - !type:HTNPrimitiveTask
+      operator: !type:ShipMoveToOperator
+        shutdownState: PlanFinished
+        removeKeyOnFinish: false
+        alwaysFaceTarget: true
+        inRangeMaxSpeed: null # orbit at top velocity
+        range: 450
+        rangeTolerance: 50
+        targetKey: TargetCoordinates
+        mode: OrbitCW
+        targetRotation: 90
+    - !type:HTNPrimitiveTask
+      operator: !type:ShipFireGunsOperator
+        shutdownState: TaskFinished
+        removeKeyOnFinish: false
+        leadingAccuracy: 0.4
+        targetKey: TargetCoordinates
+      services:
+      - !type:UtilityService
+        id: TargetsService
+        proto: NsvBluespacePatrolTargets
+        key: Target
+        coordinatesKey: TargetCoordinates
+
+- type: entity
+  id: NsvBluespaceBroadsideCoreSpawner
+  parent: NsvBluespacePatrolCoreSpawner
+  components:
+  - type: ConditionalSpawner
+    prototypes:
+    - NsvBluespaceBroadsideCore
+
+- type: entity
+  id: NsvBluespaceBroadsideCore
+  parent: NpcStationAiAttackerStaticSmart
+  components:
+  - type: HTN
+    rootTask:
+      task: NsvBluespaceBroadsideCompound
+  - type: NsvBluespaceShipAiCore
+  - type: NsvShipTarget

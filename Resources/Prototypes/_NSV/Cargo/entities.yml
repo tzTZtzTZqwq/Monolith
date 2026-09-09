@@ -1,0 +1,129 @@
+- type: entity
+  id: NsvCargoBuyConsole
+  name: NSV cargo purchase console
+  description: Buy supplies from the market of the current star system node.
+  parent: [BaseStructureDisableToolUse, BaseStructureIndestructible, BaseComputer]
+  placement:
+    mode: SnapgridCenter
+  components:
+  - type: Sprite
+    layers:
+    - map: ["computerLayerBody"]
+      state: computer
+    - map: ["computerLayerKeyboard"]
+      state: generic_keyboard
+    - map: ["computerLayerScreen"]
+      sprite: _NF/Structures/Machines/computers.rsi
+      state: cargo_market
+    - map: ["computerLayerKeys"]
+      state: tech_key
+  - type: NsvCargoMarketConsole
+    maxDeliveryMachineDistance: 8
+  - type: ActivatableUI
+    key: enum.MarketConsoleUiKey.Default
+  - type: ActivatableUIRequiresPower
+  - type: ActivatableUIRequiresAnchor
+  - type: UserInterface
+    interfaces:
+      enum.MarketConsoleUiKey.Default:
+        type: MarketConsoleBoundUserInterface
+  - type: AccessReader
+    access: [["Maintenance"]]
+  - type: Computer
+    board: Null
+
+- type: entity
+  id: NsvCargoSellConsole
+  name: NSV cargo sale console
+  description: Sell goods to the market of the current star system node.
+  parent: [BaseStructureDisableToolUse, BaseStructureIndestructible, BaseComputer]
+  placement:
+    mode: SnapgridCenter
+  components:
+  - type: Sprite
+    layers:
+    - map: ["computerLayerBody"]
+      state: computer
+    - map: ["computerLayerKeyboard"]
+      state: generic_keyboard
+    - map: ["computerLayerScreen"]
+      sprite: _NF/Structures/Machines/computers.rsi
+      state: cargo_sale
+    - map: ["computerLayerKeys"]
+      state: tech_key
+  - type: NsvCargoSellConsole
+    maxPalletDistance: 8
+  - type: ActivatableUI
+    key: enum.NsvCargoSellUiKey.Key
+  - type: ActivatableUIRequiresPower
+  - type: ActivatableUIRequiresAnchor
+  - type: UserInterface
+    interfaces:
+      enum.NsvCargoSellUiKey.Key:
+        type: NsvCargoSellConsoleBoundUserInterface
+  - type: AccessReader
+    access: [["Maintenance"]]
+  - type: Computer
+    board: Null
+
+- type: entity
+  id: NsvCargoDeliveryMachine
+  name: NSV cargo delivery machine
+  description: Where do they come from?
+  placement:
+    mode: SnapgridCenter
+  components:
+    - type: ItemPlacer
+      whitelist:
+        # Should match crates.
+        requireAll: true
+        components:
+          - EntityStorage
+          - PaperLabel
+          - ContainerContainer
+    - type: CrateMachine
+    - type: NsvCargoDelivery
+    - type: Sprite
+      sprite: _NF/Structures/Machines/crate_machine.rsi
+      snapCardinals: true
+      drawdepth: HighFloorObjects
+      layers:
+        - state: background
+          map: [ "enum.CrateMachineVisualLayers.Base" ]
+        - state: opening
+          map: ["enum.CrateMachineVisualLayers.Opening"]
+        - state: open
+          map: [ "enum.CrateMachineVisualLayers.Open" ]
+        - state: crate
+          map: [ "enum.CrateMachineVisualLayers.Crate" ]
+        - state: closing
+          map: ["enum.CrateMachineVisualLayers.Closing" ]
+        - state: closed
+          map: ["enum.CrateMachineVisualLayers.Closed"]
+    - type: AnimationPlayer
+    - type: Transform
+      anchored: true
+    - type: Physics
+      canCollide: false
+      bodyType: Static
+    - type: Fixtures
+      fixtures:
+        fix1:
+          shape:
+            !type:PhysShapeAabb
+            bounds: "-0.45,-0.45,0.45,0.45"
+          density: 300
+          mask:
+            - MachineMask
+          layer:
+            - Impassable
+            - MidImpassable
+            - LowImpassable
+          hard: False
+    - type: InteractionOutline
+    - type: Appearance
+    - type: ApcPowerReceiver
+      powerLoad: 0
+    - type: Tag
+      tags:
+        - Structure

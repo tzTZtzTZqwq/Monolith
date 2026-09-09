@@ -1,0 +1,125 @@
+- type: nsvBluespaceStarmap
+  id: NSVBluespaceStrategicMap
+  name: nsv-bluespace-starmap-name
+  description: nsv-bluespace-starmap-description
+  nodes:
+  - id: Home
+    name: nsv-bluespace-starmap-node-home-name
+    description: nsv-bluespace-starmap-node-home-description
+    type: Home
+    position: 0, 0
+    sectorTemplate: NSVBluespaceHomeSector
+    faction: NSVFederal
+    market: NSVHomeMarket
+    seed: 101
+    threat: 0
+    reward: 0
+    fuelCost: 0
+    encounterPool: []
+    connections:
+    - Asteroid
+    - Distress
+
+  - id: Asteroid
+    name: nsv-bluespace-starmap-node-asteroid-name
+    description: nsv-bluespace-starmap-node-asteroid-description
+    type: Asteroid
+    position: 150, 80
+    sectorTemplate: NSVBluespaceHunterSector
+    faction: NSVNeutral
+    seed: 202
+    threat: 3
+    reward: 1
+    fuelCost: 1
+    encounterPool: []
+    connections:
+    - Home
+    - PiratePatrol
+
+  - id: Distress
+    name: nsv-bluespace-starmap-node-distress-name
+    description: nsv-bluespace-starmap-node-distress-description
+    type: Distress
+    position: 150, -80
+    sectorTemplate: NSVBluespaceDistressSector
+    faction: NSVNeutral
+    seed: 303
+    threat: 2
+    reward: 2
+    fuelCost: 1
+    encounterPool: []
+    connections:
+    - Home
+    - UnknownSignal
+
+  - id: PiratePatrol
+    name: nsv-bluespace-starmap-node-pirate-patrol-name
+    description: nsv-bluespace-starmap-node-pirate-patrol-description
+    type: PiratePatrol
+    position: 330, 110
+    sectorTemplate: NSVBluespaceTestSector
+    faction: NSVHostile
+    market: NSVPirateMarket
+    seed: 404
+    threat: 4
+    reward: 4
+    fuelCost: 2
+    encounterPool:
+    - NSVPatrolContract
+    connections:
+    - Asteroid
+    - UnknownSignal
+
+  - id: UnknownSignal
+    name: nsv-bluespace-starmap-node-unknown-signal-name
+    description: nsv-bluespace-starmap-node-unknown-signal-description
+    type: UnknownSignal
+    position: 330, -110
+    sectorTemplate: NSVBluespaceAsteroidSector
+    faction: NSVNeutral
+    seed: 505
+    threat: 3
+    reward: 3
+    fuelCost: 2
+    encounterPool: []
+    connections:
+    - Distress
+    - PiratePatrol
+
+# Test fixture: two nodes deliberately share a sector template so integration
+# tests can verify the node-keyed sector cache keeps same-template instances
+# separate. Not referenced by any jump point console.
+- type: nsvBluespaceStarmap
+  id: NSVBluespaceTestStarmap
+  name: nsv-bluespace-starmap-name
+  description: nsv-bluespace-starmap-description
+  nodes:
+  - id: SharedAlpha
+    name: nsv-bluespace-starmap-node-asteroid-name
+    description: nsv-bluespace-starmap-node-asteroid-description
+    type: Asteroid
+    position: 0, 0
+    sectorTemplate: NSVBluespaceAsteroidSector
+    faction: NSVNeutral
+    seed: 606
+    threat: 1
+    reward: 1
+    fuelCost: 1
+    encounterPool: []
+    connections:
+    - SharedBeta
+
+  - id: SharedBeta
+    name: nsv-bluespace-starmap-node-asteroid-name
+    description: nsv-bluespace-starmap-node-asteroid-description
+    type: Asteroid
+    position: 120, 0
+    sectorTemplate: NSVBluespaceAsteroidSector
+    faction: NSVNeutral
+    seed: 707
+    threat: 1
+    reward: 1
+    fuelCost: 1
+    encounterPool: []
+    connections:
+    - SharedAlpha

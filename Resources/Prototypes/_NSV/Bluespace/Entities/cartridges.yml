@@ -1,0 +1,20 @@
+- type: entity
+  parent: NFBasePDACartridge
+  id: NsvBluespaceNavigationCartridge
+  name: bluespace navigation cartridge
+  description: A program for tracking the current bluespace sector and active encounters.
+  components:
+  - type: Sprite
+    sprite: Objects/Devices/cartridge.rsi
+    state: cart-y
+  - type: Icon
+    sprite: Objects/Devices/cartridge.rsi
+    state: cart-y
+  - type: UIFragment
+    ui: !type:NsvNavigationUi
+  - type: Cartridge
+    programName: nsv-bluespace-cartridge-program-name
+    icon:
+      sprite: Interface/Actions/pai-map.rsi
+      state: icon
+  - type: NsvBluespaceNavigationCartridge

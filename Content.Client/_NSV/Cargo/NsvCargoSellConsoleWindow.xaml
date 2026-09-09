@@ -1,0 +1,41 @@
+<controls:FancyWindow xmlns="https://spacestation14.io"
+                      xmlns:controls="clr-namespace:Content.Client.UserInterface.Controls"
+            SetSize="340 210"
+            MinSize="340 210"
+                      Title="{Loc 'nsv-cargo-sell-title'}">
+    <BoxContainer Orientation="Vertical" Margin="5">
+        <BoxContainer Orientation="Horizontal">
+              <Label Text="{Loc 'nsv-cargo-sell-market-label'}"
+                     StyleClasses="LabelKeyText" />
+              <Control HorizontalExpand="True" />
+              <Label Name="MarketLabel"
+                     Text="{Loc 'nsv-cargo-sell-market-none'}" />
+        </BoxContainer>
+        <BoxContainer Orientation="Horizontal">
+              <Label Text="{Loc 'nsv-cargo-sell-balance-label'}"
+                     StyleClasses="LabelKeyText" />
+              <Control HorizontalExpand="True" />
+              <Label Name="BalanceLabel"
+                     Text="0" />
+        </BoxContainer>
+        <BoxContainer Orientation="Horizontal">
+              <Label Text="{Loc 'nsv-cargo-sell-appraisal-label'}"
+                     StyleClasses="LabelKeyText" />
+              <Control HorizontalExpand="True" />
+              <Label Name="AppraisalLabel"
+                     Text="{Loc 'nsv-cargo-sell-no-goods-text'}" />
+        </BoxContainer>
+        <BoxContainer Orientation="Horizontal">
+              <Label Text="{Loc 'nsv-cargo-sell-count-label'}"
+                     StyleClasses="LabelKeyText" />
+              <Control HorizontalExpand="True" />
+              <Label Name="CountLabel"
+                     Text="{Loc 'nsv-cargo-sell-no-goods-text'}" />
+        </BoxContainer>
+        <Control MinSize="0 5" HorizontalExpand="True"/>
+        <Button Name="AppraiseButton"
+                Text="{Loc 'nsv-cargo-sell-appraise-button'}"/>
+        <Button Name="SellButton"
+                Text="{Loc 'nsv-cargo-sell-button'}"/>
+    </BoxContainer>
+</controls:FancyWindow>

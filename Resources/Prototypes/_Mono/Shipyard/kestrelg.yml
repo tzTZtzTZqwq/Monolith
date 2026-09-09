@@ -1,0 +1,38 @@
+# NSV playtest vessel: free Kestrel-G pointing at the NSV bluespace kestrel grid.
+# minPriceMarkup 0 deliberately relaxes the NoShipyardShipArbitrage guard for this
+# free playtest ship; the grid appraises at ~252551, so buying free and scrapping
+# prints money on servers with a real economy.
+
+- type: vessel
+  id: KestrelG
+  parent: BaseVessel
+  name: kestrel-G
+  description: A free Kestrel variant used for NSV bluespace expedition playtesting.
+  price: 0
+  minPriceMarkup: 0
+  category: Small
+  group: Shipyard
+  shuttlePath: /SharedMaps/_NSV/Bluespace/kestrel.yml
+  guidebookPage: null
+  class:
+  - Science
+  engine:
+  - Uranium
+
+- type: gameMap
+  id: KestrelG
+  mapName: 'kestrel-G'
+  mapPath: /SharedMaps/_NSV/Bluespace/kestrel.yml
+  minPlayers: 0
+  stations:
+    KestrelG:
+      stationProto: StandardFrontierVessel
+      components:
+        - type: StationNameSetup
+          mapNameTemplate: 'Kestrel-G CIV{1}'
+          nameGenerator:
+            !type:NanotrasenNameGenerator
+            prefixCreator: '14'
+        - type: StationJobs
+          availableJobs:
+            Contractor: [ 0, 0 ]
