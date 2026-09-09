@@ -35,6 +35,11 @@ public sealed partial class CleanupHelperSystem : EntitySystem
     /// </summary>
     public bool HasNearbyPlayers(EntityCoordinates coord, float radius)
     {
+        // Zero price entities collapse to a zero protection radius; treat that as "no player protection"
+        // instead of querying with an illegal zero range (EntityLookupSystem asserts range > 0).
+        if (radius <= 0f)
+            return false;
+
         var minds = _lookup.GetEntitiesInRange<MindContainerComponent>(coord, radius);
 
         foreach (var (uid, comp) in minds)
