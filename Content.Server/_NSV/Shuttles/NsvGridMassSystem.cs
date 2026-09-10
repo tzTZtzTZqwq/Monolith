@@ -136,7 +136,11 @@ public sealed class NsvGridMassSystem : EntitySystem
             totalArea += data.Mass;
         }
 
-        var extra = totalArea > 0f ? (float) (comp.AnchoredMass / totalArea) : 0f;
+        // Balance divisor: wall densities (1000-9000) are tuned for the impact system, not propulsion;
+        // without this, one shuttle wall (2000) would outweigh thousands of tile-mass units.
+        // 1/2000 makes a wall equal 4 tiles of base mass (0.5 each).
+        const float massScale = 1f / 2000f;
+        var extra = totalArea > 0f ? (float) (comp.AnchoredMass / totalArea) * massScale : 0f;
         var density = ShuttleSystem.TileDensityMultiplier + extra;
 
         var changed = false;

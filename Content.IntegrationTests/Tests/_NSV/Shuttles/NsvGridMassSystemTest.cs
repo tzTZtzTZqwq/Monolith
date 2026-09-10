@@ -13,6 +13,10 @@ public sealed class NsvGridMassSystemTest
 {
     private const string WallPrototype = "NsvGridMassTestWall";
 
+    // Balance divisor applied when folding anchored mass into tile density; mirrors
+    // NsvGridMassSystem.MassScale: a 1000 kg test wall contributes 1000/2000 = 0.5 mass, one tile's worth.
+    private const float MassScale = 1f / 2000f;
+
     // A 1x1 fixture at density 1000 => FixturesMass 1000, a controlled stand-in for a wall/machine.
     [TestPrototypes]
     private const string Prototypes = $@"
@@ -77,7 +81,7 @@ public sealed class NsvGridMassSystemTest
             });
         });
 
-        // Anchor: the grid should gain exactly the wall's mass.
+        // Anchor: the grid should gain the wall's mass scaled by MassScale.
         await server.WaitPost(() => Assert.That(xforms.AnchorEntity(wall), Is.True));
         await pair.RunTicksSync(2);
         await server.WaitAssertion(() =>
@@ -85,8 +89,8 @@ public sealed class NsvGridMassSystemTest
             Assert.Multiple(() =>
             {
                 Assert.That(entMan.GetComponent<PhysicsComponent>(grid).FixturesMass,
-                    Is.EqualTo(baseline + wallMass).Within(1f),
-                    "Grid mass should increase by the anchored wall mass.");
+                    Is.EqualTo(baseline + wallMass * MassScale).Within(0.1f),
+                    "Grid mass should increase by the anchored wall mass times the balance scale.");
                 Assert.That(entMan.GetComponent<NsvGridAnchoredMassComponent>(grid).AnchoredMass,
                     Is.EqualTo((double) wallMass).Within(1.0),
                     "Tracked anchored mass should equal the wall's fixtures mass.");
@@ -111,7 +115,7 @@ public sealed class NsvGridMassSystemTest
         {
             // baseline was 4 tiles of base density; per-tile base scales the fifth tile too.
             var perTile = baseline / 4f;
-            var expected = perTile * 5f + wallMass;
+            var expected = perTile * 5f + wallMass * MassScale;
             Assert.That(entMan.GetComponent<PhysicsComponent>(grid).FixturesMass,
                 Is.EqualTo(expected).Within(1f),
                 "Anchored mass should persist across a tile change, on top of the new tile's base mass.");
@@ -162,8 +166,8 @@ public sealed class NsvGridMassSystemTest
         await pair.RunTicksSync(2);
         await server.WaitAssertion(() =>
             Assert.That(entMan.GetComponent<PhysicsComponent>(grid).FixturesMass,
-                Is.EqualTo(baseline + wallMass).Within(1f),
-                "Grid mass should include the anchored wall before deletion."));
+                Is.EqualTo(baseline + wallMass * MassScale).Within(0.1f),
+                "Grid mass should include the scaled anchored wall before deletion."));
 
         await server.WaitPost(() => entMan.DeleteEntity(wall));
         await pair.RunTicksSync(2);
