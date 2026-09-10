@@ -80,7 +80,7 @@ public sealed class NsvBluespaceStarmapSystemTest
         try
         {
             await server.WaitPost(() =>
-                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "PiratePatrol", out var reason), Is.True, reason));
+                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "alpha-3", out var reason), Is.True, reason));
             await pair.RunSeconds(11);
             await server.WaitAssertion(() =>
             {
@@ -89,7 +89,7 @@ public sealed class NsvBluespaceStarmapSystemTest
                 var encounter = entityManager.GetComponent<NsvBluespaceEncounterComponent>(pirate.EncounterController);
                 Assert.Multiple(() =>
                 {
-                    Assert.That(pirate.NodeId, Is.EqualTo("PiratePatrol"));
+                    Assert.That(pirate.NodeId, Is.EqualTo("alpha-3"));
                     Assert.That(pirate.EncounterDefinitionId, Is.EqualTo("NSVPatrolContract"));
                     Assert.That(encounter.State, Is.EqualTo(NsvBluespaceEncounterState.Active));
                     Assert.That(encounter.Participants, Does.Contain(shuttleUid));
@@ -98,9 +98,9 @@ public sealed class NsvBluespaceStarmapSystemTest
 
             await server.WaitPost(() =>
             {
-                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "Distress", out var edgeReason), Is.False);
+                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "delta-1", out var edgeReason), Is.False);
                 Assert.That(edgeReason, Is.EqualTo("The selected starmap node is not connected to the current node."));
-                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "Asteroid", out var extractionReason), Is.False);
+                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "beta-1", out var extractionReason), Is.False);
                 Assert.That(extractionReason, Is.EqualTo("The encounter objective is not complete."));
                 Assert.That(travel.TryReturnToDeparture(shuttleUid, out var returnReason), Is.False);
                 Assert.That(returnReason, Is.EqualTo("The encounter objective is not complete."));
@@ -119,7 +119,7 @@ public sealed class NsvBluespaceStarmapSystemTest
             });
 
             await server.WaitPost(() =>
-                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "Asteroid", out var reason), Is.True, reason));
+                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "beta-1", out var reason), Is.True, reason));
             await pair.RunSeconds(11);
             await server.WaitAssertion(() =>
             {
@@ -127,7 +127,7 @@ public sealed class NsvBluespaceStarmapSystemTest
                 var asteroid = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(asteroidMapUid);
                 Assert.Multiple(() =>
                 {
-                    Assert.That(asteroid.NodeId, Is.EqualTo("Asteroid"));
+                    Assert.That(asteroid.NodeId, Is.EqualTo("beta-1"));
                     Assert.That(asteroid.TemplateId, Is.EqualTo("NSVBluespaceHunterSector"));
                     Assert.That(asteroid.EncounterController, Is.EqualTo(EntityUid.Invalid));
                     Assert.That(asteroid.ForeignGrids, Does.Contain(shuttleUid));

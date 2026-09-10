@@ -322,7 +322,7 @@ cartridge 快照的服务端状态推送（`UpdateCartridgeUiState`）由 `NsvBl
 ### 已实现
 
 - 临时 sector 的创建、legacy template 缓存、node-keyed 战略缓存、确定性模块布局、station/ship/asteroid/entity generator、owned 内容登记和 map 删除；
-- 固定 `NSVBluespaceStrategicMap`：`Home`、`Asteroid`、`Distress`、`PiratePatrol`、`UnknownSignal` 五个节点，包含本地化名称/说明、二维位置、threat/reward/fuel、faction、稳定 seed、template、encounter pool 和双向连接；`Asteroid` 与 `UnknownSignal` 故意复用同一 template，以验证节点身份隔离；
+- 固定 `NSVBluespaceStrategicMap`:13 节点四集群(`Sol`/`alpha`/`beta`/`charlie`/`delta`),包含本地化名称/说明、二维位置、threat/reward/fuel、faction、稳定 seed、template、market、encounter pool 和双向连接;`alpha-1`~`alpha-3` 为主干,`beta`(经 Hunter 舰守卫)与 `charlie`(中立小行星群)为支线,`delta` 为求救信标集群;`Sol` 与 `alpha-3` 分别挂 `NSVHomeMarket` / `NSVPirateMarket`;
 - 节点图原型加载验证：节点 ID、有限位置、非负数值、链接存在性、去重、自环拒绝和双向边；
 - 服务器权威的节点选择、debug/普通地图任意入图、node-to-node 邻接限制、显式返航、FTL completion 后提交节点 ownership，以及对两种离开方式统一的 encounter extraction 门禁；
 - 同一导航窗口中的战略图、节点详情和显式返航入口；

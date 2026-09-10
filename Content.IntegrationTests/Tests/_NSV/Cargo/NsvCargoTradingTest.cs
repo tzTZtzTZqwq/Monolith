@@ -38,8 +38,8 @@ namespace Content.IntegrationTests.Tests._NSV.Cargo;
 public sealed class NsvCargoTradingTest
 {
     private const string Starmap = "NSVBluespaceStrategicMap";
-    private const string HomeNode = "Home";
-    private const string AsteroidNode = "Asteroid";
+    private const string HomeNode = "Sol";
+    private const string MarketlessNode = "alpha-1";
     private const string ThrusterProduct = "CrateEngineeringThruster";
     private const int InitialBalance = 10000;
     // ceil(1500 * 1 * 0.9) at Home, ceil(1500 * 1 * 1.4) at the pirate market.
@@ -597,13 +597,13 @@ public sealed class NsvCargoTradingTest
             });
 
             // The hub balance is part of the ship grid and survives the jump.
-            await JumpToNodeAsync(env, AsteroidNode);
+            await JumpToNodeAsync(env, MarketlessNode);
 
             await server.WaitAssertion(() =>
             {
                 Assert.That(env.Hub.Balance, Is.EqualTo(InitialBalance - ThrusterUnitPriceHome));
 
-                // The Asteroid node has no market: cart and purchase requests are rejected.
+                // The alpha-1 node has no market: cart and purchase requests are rejected.
                 AddToCart(env, env.Buyer, 1, ThrusterProduct);
                 Purchase(env, env.Buyer);
                 Assert.That(env.Hub.Balance, Is.EqualTo(InitialBalance - ThrusterUnitPriceHome));

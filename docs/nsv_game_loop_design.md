@@ -129,10 +129,12 @@ Active
 首版固定全局 `NSVBluespaceStrategicMap`，由 YAML 定义以下节点：
 
 ```text
-Home ─ Asteroid ─ PiratePatrol
-  │                    │
-Distress ─ UnknownSignal
+Sol ─ alpha-1 ─ alpha-2 ─ alpha-3 ─┬─ beta-1 ─ beta-2 ─┐
+                                  ├─ charlie-4 ─────────┼─ delta-1 ─ delta-2 ─ delta-3
+                                  └─ charlie-1 ─ charlie-2 ─ charlie-3 ─┘(回到 charlie-4)
 ```
+
+13 个节点分四个集群:`Sol`/`alpha-1` 为联邦安全区,`alpha-2` 小行星带,`alpha-3` 海盗巡逻(挂海盗市场),`beta-1` 由 Hunter 舰守卫,`charlie` 为中立未知信号群,`delta` 为求救信标集群(`delta-3` 是死胡同终点)。
 
 每个节点定义本地化名称/介绍、二维 UI 坐标、类别、threat、reward、fuel cost、faction、sector template、稳定 seed、encounter pool 与 reciprocal connections。原型加载拒绝重复或空 node ID、非有限位置、负数值、重复/自环/未知链接以及单向边。
 

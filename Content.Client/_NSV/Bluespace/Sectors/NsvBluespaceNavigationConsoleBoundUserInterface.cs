@@ -247,15 +247,28 @@ public sealed class NsvBluespaceStarmapControl : Control
 
         foreach (var node in _nodes.Values)
         {
-            var color = node.Id == _selectedNodeId
-                ? new Color(255, 210, 82)
-                : node.IsCurrent
-                    ? new Color(71, 203, 127)
-                    : node.IsSelectable
-                        ? new Color(93, 173, 226)
-                        : new Color(123, 133, 145);
-            handle.DrawCircle(ToLocalPosition(node.Position), NodeRadius, color);
+            var position = ToLocalPosition(node.Position);
+            handle.DrawCircle(position, NodeRadius, GetNodeTypeColor(node.Type, node.IsSelectable || node.IsCurrent));
+
+            if (node.Id == _selectedNodeId)
+                handle.DrawCircle(position, NodeRadius + 4f, new Color(255, 210, 82), false);
+            else if (node.IsCurrent)
+                handle.DrawCircle(position, NodeRadius + 3f, Color.White, false);
         }
+    }
+
+    private static Color GetNodeTypeColor(NsvBluespaceStarmapNodeType type, bool fullAlpha)
+    {
+        var color = type switch
+        {
+            NsvBluespaceStarmapNodeType.Home => new Color(94, 214, 138),
+            NsvBluespaceStarmapNodeType.Asteroid => new Color(170, 138, 95),
+            NsvBluespaceStarmapNodeType.Distress => new Color(235, 160, 70),
+            NsvBluespaceStarmapNodeType.PiratePatrol => new Color(226, 88, 88),
+            NsvBluespaceStarmapNodeType.UnknownSignal => new Color(154, 122, 220),
+            _ => new Color(123, 133, 145)
+        };
+        return fullAlpha ? color : color.WithAlpha(0.35f);
     }
 
     private Vector2 ToLocalPosition(Vector2 position)
