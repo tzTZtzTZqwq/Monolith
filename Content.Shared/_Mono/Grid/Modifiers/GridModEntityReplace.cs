@@ -39,6 +39,9 @@ public sealed partial class GridModEntityReplace : GridModifier
                 if (whitelistSystem.IsWhitelistFailOrNull(rD.Whitelist, ent) && meta.EntityPrototype.ID != rD.ToReplace)
                     continue;
 
+                if (whitelistSystem.IsBlacklistPass(rD.Blacklist, ent))
+                    continue;
+
                 if (!_random.Prob(rD.Chance))
                     continue;
 
@@ -60,6 +63,9 @@ public sealed partial class ReplaceData
 {
     [DataField]
     public EntityWhitelist? Whitelist;
+
+    [DataField]
+    public EntityWhitelist? Blacklist;
 
     [DataField]
     public EntProtoId? ToReplace;

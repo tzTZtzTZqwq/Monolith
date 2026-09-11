@@ -50,6 +50,9 @@ namespace Content.Server.Shuttles.Components
         [DataField("requireSpace")]
         public bool RequireSpace = true;
 
+        [DataField]
+        public List<Vector2i> NozzleOffsets = [new(0, 1)];
+
         // Used for burns
 
         public List<EntityUid> Colliding = new();
