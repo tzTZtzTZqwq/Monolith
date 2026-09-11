@@ -1,0 +1,9 @@
+nsv-combustion-thruster-status = Fuel status: {$status}
+nsv-combustion-thruster-status-ready = ready
+nsv-combustion-thruster-status-disconnected = intakes disconnected
+nsv-combustion-thruster-status-noplasma = insufficient plasma
+nsv-combustion-thruster-status-nooxygen = insufficient oxygen
+nsv-combustion-thruster-status-nofuel = insufficient plasma and oxygen
+nsv-combustion-thruster-consumption = While firing, consumes {$plasma} mol/s plasma and {$oxygen} mol/s oxygen.
+nsv-combustion-thruster-plasma-intake = plasma intake
+nsv-combustion-thruster-oxygen-intake = oxygen intake

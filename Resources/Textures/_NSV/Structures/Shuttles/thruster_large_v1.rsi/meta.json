@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "license": "CC-BY-SA-3.0",
+  "copyright": "2x4 body sprite provided for NSV; thrust animations adapted from _Mono/Structures/Shuttles/thruster_large.rsi",
+  "size": {
+    "x": 128,
+    "y": 128
+  },
+  "states": [
+    {
+      "name": "base",
+      "directions": 4
+    },
+    {
+      "name": "thrust",
+      "directions": 4,
+      "delays": [
+        [0.1, 0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1, 0.1]
+      ]
+    },
+    {
+      "name": "thrust_burn_unshaded",
+      "directions": 4,
+      "delays": [
+        [0.1, 0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1, 0.1],
+        [0.1, 0.1, 0.1, 0.1]
+      ]
+    }
+  ]
+}

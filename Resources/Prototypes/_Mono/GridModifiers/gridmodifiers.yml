@@ -77,9 +77,18 @@
     comp: Thruster
     data:
     - chance: 0.25
+      toReplace: NsvCombustionThruster2x4
+      replaceWith: MachineFrameDestroyed2x4
+    - chance: 0.25
+      toReplace: NsvCombustionThruster2x4PartsT2
+      replaceWith: MachineFrameDestroyed2x4
+    - chance: 0.25
       whitelist:
         components:
         - Thruster
+      blacklist:
+        components:
+        - NsvCombustionThruster
       replaceWith: MachineFrameDestroyed
 
 - type: gridModifier

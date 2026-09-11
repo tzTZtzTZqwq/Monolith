@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "license": "CC-BY-SA-3.0",
+  "copyright": "2x2 frames made by kyres1 (disc:noodle_buster); 2x4 adaptation for NSV",
+  "size": {
+    "x": 128,
+    "y": 128
+  },
+  "states": [
+    { "name": "icon" }
+  ]
+}

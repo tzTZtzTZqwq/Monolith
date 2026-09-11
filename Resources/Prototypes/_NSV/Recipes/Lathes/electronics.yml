@@ -1,0 +1,4 @@
+- type: latheRecipe
+  parent: BaseCircuitboardRecipe
+  id: NsvCombustionThruster2x4MachineCircuitboard
+  result: NsvCombustionThruster2x4MachineCircuitboard

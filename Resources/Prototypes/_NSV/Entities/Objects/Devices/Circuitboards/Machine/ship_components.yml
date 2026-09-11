@@ -1,0 +1,21 @@
+- type: entity
+  id: NsvCombustionThruster2x4MachineCircuitboard
+  parent: BaseMachineCircuitboard
+  name: large combustion thruster machine board
+  description: A large circuitboard for a 2x4 plasma-oxygen combustion thruster.
+  components:
+  - type: MachineBoard
+    prototype: NsvCombustionThruster2x4
+    frameSize: 2x4
+    requirements:
+      Capacitor: 8
+    tagRequirements:
+      ComponentBrickEconomy1:
+        amount: 2
+        defaultPrototype: ComponentBrickEconomy1
+      ElectromagnetEconomy1:
+        amount: 8
+        defaultPrototype: ElectromagnetEconomy1
+      ArmorPlateEconomy1:
+        amount: 8
+        defaultPrototype: ArmorPlateEconomy1
