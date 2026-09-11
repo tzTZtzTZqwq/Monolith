@@ -5,8 +5,7 @@
 本文档是敌方船只 AI 的第二版行为设计,服务于路线图 M2(一场可玩的舰战)。范围为首版切片:
 
 1. 战术状态机:**接近 / 缠斗 / 撤退** 三态,按优先级分支选择;
-2. 残废信号:以 **AI core 被摧毁 / 断电 5 秒** 判定本舰失去战斗能力;
-3. 修复 broadside 变体的 YAML 缩进 bug(已确认存在,详见下文)。
+2. 残废信号:以 **AI core 被摧毁 / 断电 5 秒** 判定本舰失去战斗能力。
 
 不在本版范围(层 2/3,见文末"后续方向"):
 
@@ -16,7 +15,7 @@
 
 所有新增代码与原型位于 `_NSV`;不修改 `_Mono` 的 steering、targeting、fire-control 与通用 NPC 系统。
 
-## 现状与已确认问题
+## 现状与问题
 
 当前 GUST 行为是一条扁平直线(`Resources/Prototypes/_NSV/Bluespace/AI/ship_ai.yml`):
 
@@ -31,19 +30,9 @@ UtilityOperator(NsvBluespacePatrolTargets) 选最近 hostile 目标
 
 1. **没有状态。** 血量再低也不撤,距离再远也不换走位,三个岗位(尤其 Gunner 的"追不追"决策和 Engineer 的维修窗口)没有对手行为制造取舍。
 2. **AI 无法感知自身状态。** 所有现有 consideration / precondition 都评估*目标*;黑板中不存在任何"本舰是否残废"的键。
-3. **broadside 变体参数从未生效(已确认)。** `ship_ai.yml:96-117` 把 `ShipMoveToOperator` / `ShipFireGunsOperator` 的 DataField 写成了 `operator:` 的兄弟节点。而 `HTNPrimitiveTask`(Content.Server/NPC/HTN/PrimitiveTasks/HTNPrimitiveTask.cs)只接受 `applyEffectsOnStartup / preconditions / operator / services` 四个字段,这些兄弟键全部落在未知字段上被丢弃。因此 broadside 若被生成,两个 operator 均以 C# 默认值运行:
+3. **broadside 变体同样无状态机,且精度参数与 patrol 从未对齐。** `NsvBluespaceBroadsideAttackCompound`(`ship_ai.yml:88-117`)也是单分支扁平计划:固定 OrbitCW 450、侧舷 90°、全速,没有接近与撤退。Hunter 舰(`Resources/SharedMaps/_NSV/Bluespace/hunter.yml`,uid 173)直接内嵌 `NsvBluespaceBroadsideCore`,星图 Asteroid 节点经 `NSVBluespaceHunterSector` 使用该舰——因此本计划若只改 patrol root,Hunter 行为不变。另外 broadside 的 `leadingAccuracy` 为 0.4 而 patrol 为 0.6,调参时需一并确认。
 
-   | 本应配置 | 实际生效(默认值) |
-   | --- | --- |
-   | `mode: OrbitCW` | `GoToRange`(不绕圈) |
-   | `range: 450` | `range: 5`(贴脸) |
-   | `inRangeMaxSpeed: null` | `0.1`(几乎刹停) |
-   | `shutdownState: PlanFinished` | `TaskFinished` |
-   | `avoidProjectiles` / `targetKey` 等 | 默认值 |
-
-   即:broadside core 实际行为是"以极低速冲到目标 5 格内并停住"。
-
-   **该 bug 是现网生效的,并非休眠配置:** Hunter 舰(`Resources/SharedMaps/_NSV/Bluespace/hunter.yml`,uid 173)直接内嵌 `NsvBluespaceBroadsideCore`,而星图 Asteroid 节点经 `NSVBluespaceHunterSector` 使用该舰。玩家当前在 Asteroid 节点遇到的猎手舰即受此 bug 影响:不绕圈、贴脸 5 格、几乎刹停——一艘 3 炮重甲侧舷舰表现为漂在原地的固定靶。修复此 bug 是本计划的前置项。
+   > **已排除的问题(v1 稿误判)。** 本文 v1 曾断言 broadside 两个 operator 的 DataField 被误写为 `operator:` 的兄弟节点而全部失效,推导出"贴脸 5 格、几乎刹停的固定靶"并将其列为前置修复项。复核 `ship_ai.yml:95-111`,DataField 均正确缩进在 `operator:` 之下,与 patrol 变体(36-56 行)结构一致;`git blame` 显示这些行自初始提交 `b958f19a4f` 起未被改动。**该 bug 不存在**,对应的修复章节与回归测试已从本计划移除。
 
 4. 目标选择只看距离与存活(`TargetInverseDistanceCon` + `TargetIsAliveOrNACon`),评分无威胁/价值维度。
 
@@ -121,7 +110,7 @@ core 实体终止即 HTN 实体消失,不存在"被摧毁后撤退"的可能—�
 | 缠斗 | range / tolerance | 450 / 50 | OrbitCW 轨道半径 |
 | 缠斗 | targetRotation | 90° | 侧舷对敌 |
 | 缠斗 | inRangeMaxSpeed | null | 轨道全速 |
-| 缠斗 | leadingAccuracy | 0.5 | 缠斗距离近,精度可低于现版 |
+| 缠斗 | leadingAccuracy | 0.5 | 介于 patrol 0.6 与 broadside 0.4 之间;缠斗距离近,精度可低于接近态 |
 | 撤退 | range / tolerance | 1500 / 300 | 拉开距离 |
 | 撤退 | inRangeMaxSpeed | null | 全速撤退 |
 | 撤退 | alwaysFaceTarget | true | 边撤边打(风筝) |
@@ -301,17 +290,15 @@ public static class NsvShipAiBlackboard
         coordinatesKey: TargetCoordinates
 ```
 
-### 3. broadside 缩进修复
+### 3. 实体原型改动
 
-将现有 `NsvBluespaceBroadsideAttackCompound`(96–117 行)的两个 operator 的全部 DataField 缩进到 `operator:` 之下,与 patrol 变体(36–56 行)结构一致。修复后 Asteroid 节点的 Hunter 舰即恢复设计行为:单态 OrbitCW 450 侧舷绕圈全速炮击。broadside 计划保持单态(无撤退/接近分支),与 patrol root 的三态缠斗分支参数等价;若 Hunter 舰也需要残废撤退行为,后续可把它的 root 切到三态 compound。
-
-### 4. 实体原型改动
-
-`NsvBluespacePatrolCore` 与 `NsvBluespaceBroadsideCore` 增加:
+`NsvBluespacePatrolCore` 增加:
 
 ```yaml
 - type: NsvShipAiCoreState   # 断电 5 秒闩锁 + 撤退信号来源
 ```
+
+`NsvBluespaceBroadsideCore` 本版**不加**:它的 root 仍是单态 `NsvBluespaceBroadsideCompound`,没有读 `NsvCoreCrippled` 的分支,挂上只会空转闩锁。Hunter 是否改用三态 `NsvBluespaceEngageCompound`,待 patrol 三态在游戏内调参稳定后再定。
 
 ## 边界与不变量
 
@@ -328,8 +315,7 @@ public static class NsvShipAiBlackboard
 1. **闩锁触发**:在测试扇区生成 patrol core,将其 `ApcPowerReceiver` 置为无电,推进 ≥5 秒,断言 `HTNComponent.Blackboard` 的 `NsvCoreCrippled == true` 且组件 `Crippled` 已闩锁;断电 <5 秒恢复电力则不闩锁。
 2. **撤退分支选中**:闩锁后恢复电力,提供 hostile 目标,等待重规划,断言 `ShipSteererComponent` 的 `Range == 1500`、`AlwaysFaceTarget == true`(撤退参数生效)。
 3. **缠斗/接近切换**:未残废 core + 远距目标 → 断言 steerer 为 `GoToRange` 且 `Range == 500`;目标位于 600 内 → 断言 `Mode == OrbitCW`、`Range == 450`。
-4. **broadside 修复回归**:生成 `NsvBluespaceBroadsideCore`,提供目标,断言 `Mode == OrbitCW && Range == 450 && InRangeMaxSpeed == null`(修复前为 `GoToRange && Range == 5`)。
-5. **闩锁不影响目标查询**:残废 core 仍能锁定新目标(service 正常刷新),但分支恒为撤退。
+4. **闩锁不影响目标查询**:残废 core 仍能锁定新目标(service 正常刷新),但分支恒为撤退。
 
 回归:现有 `NsvShipTargetQueryTest`、`NsvBluespaceSectorSystemTest`、`NsvBluespaceEncounterSystemTest` 全量保持通过;测试结尾维持"返航 + TryDispose"惯例。
 
@@ -349,7 +335,8 @@ dotnet test .\Content.IntegrationTests\Content.IntegrationTests.csproj -c Debug 
 - 断电阈值 5 秒是否过长/过短(RTG 恢复速率决定残废是否可观察);
 - 接近距离从 750 收到 500 后 GUST 接敌压力变化;
 - 缠斗轨道 450 与 `WeaponTurretShard` 实际有效射程的匹配(当前未按武器射程自适应,层 2 候选);
-- 撤退 1500 距离在测试扇区尺度下是否等于"脱离战斗"。
+- 撤退 1500 距离在测试扇区尺度下是否等于"脱离战斗";
+- patrol 0.6 / 缠斗 0.5 / broadside 0.4 三档 `leadingAccuracy` 是否需要按距离统一成一套规则。
 
 ## 后续方向(层 2/3,未排期)
 
