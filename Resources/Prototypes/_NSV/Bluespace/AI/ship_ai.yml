@@ -133,3 +133,56 @@
       task: NsvBluespaceBroadsideCompound
   - type: NsvBluespaceShipAiCore
   - type: NsvShipTarget
+
+# Standalone (non-HTN) AI core. Uses NsvShipAiSystem instead of an HTN component; do NOT add a
+# HTN component here or the two will fight over the same steering/targeting.
+- type: entity
+  id: NsvBluespaceStandaloneCoreSpawner
+  parent: NsvBluespacePatrolCoreSpawner
+  components:
+  - type: ConditionalSpawner
+    prototypes:
+    - NsvBluespaceStandaloneCore
+
+- type: entity
+  id: NsvBluespaceStandaloneCore
+  parent: NpcStationAiAttackerStaticSmart
+  components:
+  - type: NsvShipAi
+    blacklist:
+      tags:
+      - ShuttleAIIgnore
+  - type: NsvBluespaceShipAiCore
+  - type: NsvShipTarget
+
+# Broadside variant of the standalone AI, defined purely in data: orbit the target clockwise
+# at 450m with the ship's flank towards it. No code differs from NsvBluespaceStandaloneCore.
+- type: entity
+  id: NsvBluespaceStandaloneBroadsideCore
+  parent: NsvBluespaceStandaloneCore
+  components:
+  - type: NsvShipAi
+    steeringMode: OrbitCW
+    targetRotation: 90
+    engageRange: 450
+    engageRangeTolerance: 50
+    inRangeMaxSpeed: null # orbit at top velocity
+    leadingAccuracy: 0.4
+
+# Spin-in-place smoke test for the standalone AI: exercises NsvShipAiSystem -> steering
+# rotation control without any combat. Spin speed is rad/s (0.5 = ~29 deg/s).
+- type: entity
+  id: NsvBluespaceSpinTestCore
+  parent: NsvBluespaceStandaloneCore
+  components:
+  - type: NsvShipAi
+    testSpinSpeed: 0.5
+
+# Keep-distance smoke test: backs off until it has ~100m hull-to-hull clearance from every
+# other grid on the map, then holds position. Exercises the "AI feeds waypoints" pattern.
+- type: entity
+  id: NsvBluespaceKeepDistanceTestCore
+  parent: NsvBluespaceStandaloneCore
+  components:
+  - type: NsvShipAi
+    testKeepDistance: 100
