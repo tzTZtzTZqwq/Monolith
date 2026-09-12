@@ -91,6 +91,14 @@ public sealed partial class ShipSteererComponent : Component
     public int EvasionSectorDepth = 2;
 
     /// <summary>
+    /// If set, face these coordinates instead of the ones we're moving to.
+    /// Lets the movement destination and the facing target differ, e.g. withdrawing away from a
+    /// threat while still keeping guns on the current target.
+    /// </summary>
+    [ViewVariables(VVAccess.ReadWrite)]
+    public EntityCoordinates? FacingCoordinates = null;
+
+    /// <summary>
     /// Whether to consider the movement finished if we collide with target.
     /// </summary>
     [ViewVariables(VVAccess.ReadWrite)]

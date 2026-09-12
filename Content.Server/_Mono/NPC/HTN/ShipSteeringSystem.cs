@@ -109,6 +109,16 @@ public sealed partial class ShipSteeringSystem : EntitySystem
 
         Angle? targetAngle = inRange && ent.Comp.InRangeRotation is { } rot ? rot : (ent.Comp.AlwaysFaceTarget ? toTargetVec.ToWorldAngle() : null);
 
+        // an explicit facing target overrides both, letting us move and aim in different directions
+        if (ent.Comp.FacingCoordinates is { } facing && !TerminatingOrDeleted(facing.EntityId))
+        {
+            var facingMap = _transform.ToMapCoordinates(facing);
+            var toFacingVec = facingMap.Position - shipPos.Position;
+
+            if (facingMap.MapId == shipPos.MapId && toFacingVec.LengthSquared() > 0f)
+                targetAngle = toFacingVec.ToWorldAngle();
+        }
+
         var config = new SteeringConfig
         {
             MaxArrivedVel = ent.Comp.InRangeMaxSpeed ?? float.PositiveInfinity,
