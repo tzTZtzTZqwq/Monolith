@@ -17,10 +17,11 @@ namespace Content.Server.Shuttles.Components
         public const float BrakeCoefficient = 1.5f;
 
         /// <summary>
-        /// Mono - velocity that 2x slowdown will be applied at. (4x at 2x this, 8x at 3x this, etc.)
+        /// NSV - reference velocity for the soft thrust slowdown curve (MoverController.GetDirectionThrust).
+        /// Mono's original value was 50; lowered to 30 for NSV combat ranges.
         /// </summary>
         [ViewVariables(VVAccess.ReadWrite)]
-        public float BaseMaxLinearVelocity = 50f;
+        public float BaseMaxLinearVelocity = 30f;
 
         public const float MaxAngularVelocity = 4f;
 
