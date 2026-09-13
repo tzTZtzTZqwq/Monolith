@@ -1,3 +1,4 @@
+using System.Numerics;
 using Content.Server._Mono.NPC.HTN;
 using Content.Server.NPC;
 using Content.Shared.Whitelist;
@@ -156,6 +157,33 @@ public sealed partial class NsvShipAiComponent : Component
     public int OrbitSign = 1;
 
     /// <summary>
+    /// How far away a same-faction AI core still counts as a fleet member. Cores on the same map
+    /// and faction within this range form the implicit fleet that shares attack-angle slots.
+    /// </summary>
+    [DataField]
+    public float FleetRange = 2500f;
+
+    /// <summary>
+    /// Target de-prioritization per lower-UID fleetmate already targeting the same candidate:
+    /// score /= 1 + claimed * penalty. Prevents the whole fleet focusing one target; lower-UID
+    /// priority keeps the distributed assignment deterministic (no oscillation).
+    /// </summary>
+    [DataField]
+    public float FleetTargetPenalty = 0.75f;
+
+    /// <summary>
+    /// Angular spacing between adjacent fleet members' attack flanks, in degrees.
+    /// </summary>
+    [DataField]
+    public float FleetSpreadStep = 35f;
+
+    /// <summary>
+    /// Maximum per-ship attack-angle deflection from the base flank, in degrees (JS demo's ±130°).
+    /// </summary>
+    [DataField]
+    public float FleetSpreadMax = 130f;
+
+    /// <summary>
     /// Countdown until the next decision.
     /// </summary>
     [ViewVariables]
@@ -186,6 +214,40 @@ public sealed partial class NsvShipAiComponent : Component
     /// </summary>
     [ViewVariables]
     public float CachedWeaponRange;
+
+    /// <summary>
+    /// Fleet slot: index into the UID-sorted implicit fleet (same map, same faction, within
+    /// <see cref="FleetRange"/>). Refreshed each decision tick.
+    /// </summary>
+    [ViewVariables]
+    public int FleetIndex;
+
+    /// <summary>
+    /// Number of cores in the implicit fleet including this one. 1 = solo, no fleet behavior.
+    /// </summary>
+    [ViewVariables]
+    public int FleetSize = 1;
+
+    /// <summary>
+    /// Assigned attack-angle deflection from the base flank in degrees, spread across the fleet
+    /// by <see cref="FleetIndex"/>. 0 for solo ships.
+    /// </summary>
+    [ViewVariables]
+    public float FleetAngleOffset;
+
+    /// <summary>
+    /// Normalized sum of toward-threat directions (hostiles other than the current target),
+    /// computed each decision tick. Zero vector = no usable threat geometry.
+    /// </summary>
+    [ViewVariables]
+    public Vector2 CachedThreatDir;
+
+    /// <summary>
+    /// Hostiles within <see cref="ThreatMaxDistance"/> other than the current target, counted
+    /// each decision tick. Drives the attack-vector base direction choice.
+    /// </summary>
+    [ViewVariables]
+    public int CachedOtherThreats;
 
     /// <summary>
     /// Test behavior: instead of fighting, spin the ship in place at this angular velocity (rad/s).

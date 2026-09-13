@@ -43,6 +43,7 @@ public sealed class NsvShipAiSystem : EntitySystem
     private readonly HashSet<Entity<NsvShipTargetComponent>> _threats = new();
     private readonly HashSet<Entity<ShipShieldEmitterComponent>> _emitters = new();
     private readonly HashSet<Entity<FireControllableComponent>> _guns = new();
+    private readonly List<Entity<NsvShipAiComponent>> _fleet = new();
 
     public override void Initialize()
     {
@@ -99,7 +100,9 @@ public sealed class NsvShipAiSystem : EntitySystem
             if (ai.DecisionAccumulator <= 0f)
             {
                 ai.DecisionAccumulator += ai.DecisionInterval;
+                UpdateFleet((uid, ai));
                 Decide((uid, ai), shipUid.Value);
+                ScanThreats((uid, ai), shipUid.Value);
             }
 
             // Every frame: keep steering/targeting pointed at the live target position so leading and
@@ -128,7 +131,7 @@ public sealed class NsvShipAiSystem : EntitySystem
                 // Navigation point: the target itself, or a flank point orbiting it when the
                 // threat layout suggests an attack side.
                 var navCoords = targetCoords;
-                var attackVec = CalcAttackVector((uid, ai), shipUid.Value, target);
+                var attackVec = CalcAttackVector((uid, ai), target);
                 if (attackVec is { } vec)
                 {
                     var targetMap = _transform.GetMapCoordinates(target);
@@ -154,6 +157,108 @@ public sealed class NsvShipAiSystem : EntitySystem
             if (targeter != null)
                 targeter.LeadingAccuracy = ai.LeadingAccuracy;
         }
+    }
+
+    /// <summary>
+    /// Implicit fleet assembly: every AI core on the same map with the same faction within
+    /// <see cref="NsvShipAiComponent.FleetRange"/>. Members are UID-sorted so each core derives a
+    /// stable slot index with no central fleet entity or membership bookkeeping — a ship dying
+    /// never reshuffles the surviving slots. The member list stays in <see cref="_fleet"/> for
+    /// the target de-prioritization in <see cref="Decide"/>; it is valid only until the next
+    /// core's decision (single-threaded, no reentrancy).
+    /// </summary>
+    private void UpdateFleet(Entity<NsvShipAiComponent> ent)
+    {
+        var ai = ent.Comp;
+        _fleet.Clear();
+
+        if (_factions.TryGetFaction(ent, out var ownFaction))
+        {
+            var ownPos = _transform.GetMapCoordinates(Transform(ent));
+
+            var query = EntityQueryEnumerator<NsvShipAiComponent>();
+            while (query.MoveNext(out var mateUid, out var mateAi))
+            {
+                if (mateUid == ent.Owner || TerminatingOrDeleted(mateUid))
+                    continue;
+
+                if (!_factions.TryGetFaction(mateUid, out var mateFaction) || mateFaction != ownFaction)
+                    continue;
+
+                var matePos = _transform.GetMapCoordinates(Transform(mateUid));
+                if (matePos.MapId != ownPos.MapId)
+                    continue;
+
+                if ((matePos.Position - ownPos.Position).Length() > ai.FleetRange)
+                    continue;
+
+                _fleet.Add((mateUid, mateAi));
+            }
+        }
+
+        if (_fleet.Count == 0)
+        {
+            ai.FleetSize = 1;
+            ai.FleetIndex = 0;
+            ai.FleetAngleOffset = 0f;
+            return;
+        }
+
+        _fleet.Add(ent);
+        _fleet.Sort((a, b) => a.Owner.CompareTo(b.Owner));
+
+        ai.FleetSize = _fleet.Count;
+        ai.FleetIndex = _fleet.IndexOf(ent);
+
+        var offset = (ai.FleetIndex - (ai.FleetSize - 1) / 2f) * ai.FleetSpreadStep;
+        ai.FleetAngleOffset = Math.Clamp(offset, -ai.FleetSpreadMax, ai.FleetSpreadMax);
+    }
+
+    /// <summary>
+    /// Decision-tick threat scan: sum of toward-threat directions for hostiles other than the
+    /// current target (fleetmates are same-faction and never counted), cached for the per-frame
+    /// attack-vector composition. Moving the range query here keeps CalcAttackVector query-free.
+    /// </summary>
+    private void ScanThreats(Entity<NsvShipAiComponent> ent, EntityUid shipUid)
+    {
+        var ai = ent.Comp;
+        var sum = Vector2.Zero;
+        var threats = 0;
+        var ownPos = _transform.GetMapCoordinates(Transform(ent));
+
+        _threats.Clear();
+        _lookup.GetEntitiesInRange(ownPos, ai.ThreatMaxDistance, _threats);
+
+        foreach (var threat in _threats)
+        {
+            var candidate = threat.Owner;
+            if (candidate == ent.Owner || candidate == ai.Target || TerminatingOrDeleted(candidate))
+                continue;
+
+            if (Transform(candidate).GridUid == shipUid)
+                continue;
+
+            if (!_factions.IsHostile(ent.Owner, candidate))
+                continue;
+
+            var pos = _transform.GetMapCoordinates(candidate);
+            if (pos.MapId != ownPos.MapId)
+                continue;
+
+            var to = pos.Position - ownPos.Position;
+            var d = to.Length();
+            if (d <= 0f)
+                continue;
+
+            var w = 1f - MathF.Pow(d / ai.ThreatMaxDistance, ai.ThreatDistancePower);
+            sum += to / d * w;
+            threats++;
+        }
+
+        _threats.Clear();
+
+        ai.CachedOtherThreats = threats;
+        ai.CachedThreatDir = NormalizedOrZero(sum);
     }
 
     /// <summary>
@@ -184,6 +289,23 @@ public sealed class NsvShipAiSystem : EntitySystem
             var score = (value + 100f) / (distSq + ai.TargetDistanceOffset);
             if (candidate == ai.Target)
                 score *= ai.TargetStickiness;
+
+            // Fleet target de-prioritization: candidates already claimed by a lower-UID
+            // fleetmate score lower. Lower-UID priority makes the distributed assignment
+            // deterministic — the claiming ship never sees its own target penalized, so
+            // ships yield in one direction instead of oscillating.
+            var claimed = 0;
+            foreach (var mate in _fleet)
+            {
+                if (mate.Owner == ent.Owner || mate.Comp.Target != candidate)
+                    continue;
+
+                if (mate.Owner.Id < ent.Owner.Id)
+                    claimed++;
+            }
+
+            if (claimed > 0)
+                score /= 1f + claimed * ai.FleetTargetPenalty;
 
             if (score > bestScore)
             {
@@ -495,13 +617,13 @@ public sealed class NsvShipAiSystem : EntitySystem
     }
 
     /// <summary>
-    /// Pick the direction (from the target towards us) to establish our engagement position on.
-    /// With one dominant threat nearby we take the flank: rotate the away-from-threat direction
-    /// by orbitSign * 90 degrees, so multiple AI ships spread to different sides instead of
-    /// stacking on one approach vector. With no meaningful threat layout we keep whatever side
-    /// we're already on (approach straight along the current bearing).
+    /// Per-frame attack-vector composition from decision-tick caches (no entity queries).
+    /// Base flank direction: two or more other hostiles use their summed geometry; one other
+    /// hostile or any fleet presence flanks the target itself; a lone ship with no other
+    /// hostiles approaches straight (null). The fleet-assigned angle offset spreads members
+    /// around the base flank instead of all taking the same side.
     /// </summary>
-    private Vector2? CalcAttackVector(Entity<NsvShipAiComponent> ent, EntityUid shipUid, EntityUid target)
+    private Vector2? CalcAttackVector(Entity<NsvShipAiComponent> ent, EntityUid target)
     {
         var ai = ent.Comp;
         var ownPos = _transform.GetMapCoordinates(Transform(ent));
@@ -509,60 +631,29 @@ public sealed class NsvShipAiSystem : EntitySystem
         if (targetPos.MapId != ownPos.MapId)
             return null;
 
-        var away = Vector2.Zero;
-        var threats = 0;
-
-        _threats.Clear();
-        _lookup.GetEntitiesInRange(ownPos, ai.ThreatMaxDistance, _threats);
-
-        foreach (var threat in _threats)
+        Vector2 baseDir;
+        if (ai.CachedOtherThreats >= 2)
         {
-            var candidate = threat.Owner;
-            if (candidate == ent.Owner || candidate == target || TerminatingOrDeleted(candidate))
-                continue;
-
-            if (Transform(candidate).GridUid == shipUid)
-                continue;
-
-            if (!_factions.IsHostile(ent.Owner, candidate))
-                continue;
-
-            var pos = _transform.GetMapCoordinates(candidate);
-            if (pos.MapId != ownPos.MapId)
-                continue;
-
-            var to = pos.Position - ownPos.Position;
-            var d = to.Length();
-            if (d <= 0f)
-                continue;
-
-            var w = 1f - MathF.Pow(d / ai.ThreatMaxDistance, ai.ThreatDistancePower);
-            away += to / d * w;
-            threats++;
+            baseDir = ai.CachedThreatDir;
+        }
+        else if (ai.CachedOtherThreats == 1 || ai.FleetSize > 1)
+        {
+            baseDir = NormalizedOrZero(ownPos.Position - targetPos.Position);
+        }
+        else
+        {
+            return null;
         }
 
-        _threats.Clear();
-
-        if (threats == 0)
+        if (baseDir == Vector2.Zero)
             return null;
 
-        var awayDir = NormalizedOrZero(away);
-        if (awayDir == Vector2.Zero)
-            return null;
-
-        // No other threats: pick the flank of the current target itself.
-        if (threats == 1)
-        {
-            var fromTarget = NormalizedOrZero(ownPos.Position - targetPos.Position);
-            if (fromTarget != Vector2.Zero)
-                awayDir = fromTarget;
-        }
-
-        // Rotate 90 degrees by the ship's fixed orbit handedness: perpendicular of awayDir.
-        var attackVec = new Vector2(-awayDir.Y, awayDir.X);
+        // Rotate the base flank by the fleet slot offset, mirrored by the ship's handedness:
+        // offset 0 with OrbitSign +1 is exactly the historical 90-degree perpendicular.
+        var angle = MathF.PI / 2f + ai.FleetAngleOffset * MathF.PI / 180f;
         if (ai.OrbitSign < 0)
-            attackVec = -attackVec;
+            angle = -angle;
 
-        return NormalizedOrZero(attackVec);
+        return NormalizedOrZero(new Angle(angle).RotateVec(baseDir));
     }
 }
