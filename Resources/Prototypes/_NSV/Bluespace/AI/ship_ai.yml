@@ -165,6 +165,7 @@
     steeringMode: OrbitCW
     targetRotation: 90
     engageRange: 450
+    autoEngageRange: false # tuned orbit radius, don't derive it from weapon range
     engageRangeTolerance: 50
     inRangeMaxSpeed: null # orbit at top velocity
     leadingAccuracy: 0.4

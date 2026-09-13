@@ -31,7 +31,8 @@ public sealed partial class NsvShipAiComponent : Component
     public EntityWhitelist Blacklist = new();
 
     /// <summary>
-    /// Desired engagement distance to keep from the target.
+    /// Desired engagement distance to keep from the target. Only used when <see cref="AutoEngageRange"/>
+    /// is false or the ship has no scannable weapons.
     /// </summary>
     [DataField]
     public float EngageRange = 750f;
@@ -81,6 +82,52 @@ public sealed partial class NsvShipAiComponent : Component
     public bool AvoidProjectiles = true;
 
     /// <summary>
+    /// Derive the engagement range from the ship's own longest weapon range plus shield stress
+    /// instead of the fixed <see cref="EngageRange"/>:
+    /// range = WeaponRange * <see cref="RangeScale"/> + stress * <see cref="StressRangeBonus"/>.
+    /// </summary>
+    [DataField]
+    public bool AutoEngageRange = true;
+
+    /// <summary>
+    /// Fraction of the longest weapon's range to hold as the base engagement distance.
+    /// </summary>
+    [DataField]
+    public float RangeScale = 0.8f;
+
+    /// <summary>
+    /// Extra engagement distance added linearly with shield stress (0..1). Soft retreat: the AI
+    /// drifts further out as its shields fail before switching to full withdrawal.
+    /// </summary>
+    [DataField]
+    public float StressRangeBonus = 250f;
+
+    /// <summary>
+    /// Shield stress (0..1) at which the AI stops maneuvering for advantage and withdraws.
+    /// Ships without shield emitters never accumulate stress and thus never withdraw.
+    /// </summary>
+    [DataField]
+    public float WithdrawStressThreshold = 0.85f;
+
+    /// <summary>
+    /// How far away hostiles still contribute to the withdraw direction.
+    /// </summary>
+    [DataField]
+    public float ThreatMaxDistance = 1500f;
+
+    /// <summary>
+    /// Distance falloff exponent for threat weighting in the withdraw direction.
+    /// </summary>
+    [DataField]
+    public float ThreatDistancePower = 2f;
+
+    /// <summary>
+    /// How far along the withdraw direction to place the navigation waypoint.
+    /// </summary>
+    [DataField]
+    public float WithdrawDistance = 1000f;
+
+    /// <summary>
     /// Seconds between AI decisions. Steering/targeting still run every frame off the last decision,
     /// tracking the live target position; this only throttles target choice and tactical decisions.
     /// </summary>
@@ -105,6 +152,26 @@ public sealed partial class NsvShipAiComponent : Component
     /// </summary>
     [ViewVariables]
     public EntityUid? Target;
+
+    /// <summary>
+    /// Countdown until the next perception refresh.
+    /// </summary>
+    [ViewVariables]
+    public float PerceptionAccum;
+
+    /// <summary>
+    /// Last measured shield stress (0..1): worst emitter Damage/DamageLimit, 1 if any emitter is
+    /// in recharge mode. Refreshed every few seconds; 0 for ships without shield emitters.
+    /// </summary>
+    [ViewVariables]
+    public float CachedShieldStress;
+
+    /// <summary>
+    /// Last measured longest weapon range in meters (hitscan max distance, or projectile speed
+    /// times lifetime). 0 = no scannable weapons on the grid.
+    /// </summary>
+    [ViewVariables]
+    public float CachedWeaponRange;
 
     /// <summary>
     /// Test behavior: instead of fighting, spin the ship in place at this angular velocity (rad/s).
