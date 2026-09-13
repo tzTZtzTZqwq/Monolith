@@ -142,6 +142,20 @@ public sealed partial class NsvShipAiComponent : Component
     public float TargetStickiness = 1.35f;
 
     /// <summary>
+    /// Distance-squared offset in the targeting score denominator. Keeps near-ties stable when
+    /// distances are tiny relative to the scale of the search range.
+    /// </summary>
+    [DataField]
+    public float TargetDistanceOffset = 50000f;
+
+    /// <summary>
+    /// Fixed per-ship orbit handedness: +1 counter-clockwise, -1 clockwise. Set once at spawn so
+    /// the attack flank choice doesn't flip frame to frame.
+    /// </summary>
+    [DataField]
+    public int OrbitSign = 1;
+
+    /// <summary>
     /// Countdown until the next decision.
     /// </summary>
     [ViewVariables]

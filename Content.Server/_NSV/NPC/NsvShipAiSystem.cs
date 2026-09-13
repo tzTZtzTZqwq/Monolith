@@ -121,14 +121,25 @@ public sealed class NsvShipAiSystem : EntitySystem
             }
             else
             {
-                var steerer = _steering.Steer(uid, targetCoords);
+                var engage = ai.EngageRange;
+                if (ai.AutoEngageRange && ai.CachedWeaponRange > 0f)
+                    engage = ai.CachedWeaponRange * ai.RangeScale + ai.CachedShieldStress * ai.StressRangeBonus;
+
+                // Navigation point: the target itself, or a flank point orbiting it when the
+                // threat layout suggests an attack side.
+                var navCoords = targetCoords;
+                var attackVec = CalcAttackVector((uid, ai), shipUid.Value, target);
+                if (attackVec is { } vec)
+                {
+                    var targetMap = _transform.GetMapCoordinates(target);
+                    navCoords = _transform.ToCoordinates(
+                        new MapCoordinates(targetMap.Position + vec * engage, targetMap.MapId));
+                }
+
+                var steerer = _steering.Steer(uid, navCoords);
                 if (steerer != null)
                 {
-                    var engage = ai.EngageRange;
-                    if (ai.AutoEngageRange && ai.CachedWeaponRange > 0f)
-                        engage = ai.CachedWeaponRange * ai.RangeScale + ai.CachedShieldStress * ai.StressRangeBonus;
-
-                    steerer.Range = engage;
+                    steerer.Range = attackVec != null ? 1f : engage;
                     steerer.RangeTolerance = ai.EngageRangeTolerance;
                     steerer.InRangeMaxSpeed = ai.InRangeMaxSpeed;
                     steerer.AlwaysFaceTarget = ai.AlwaysFaceTarget;
@@ -146,7 +157,8 @@ public sealed class NsvShipAiSystem : EntitySystem
     }
 
     /// <summary>
-    /// Pick or keep a target. Nearest hostile wins, with stickiness toward the current one.
+    /// Pick or keep a target. Threat value over squared distance wins (a heavily-armed distant
+    /// hostile can outrank a nearby gunboat), with stickiness toward the current one.
     /// </summary>
     private void Decide(Entity<NsvShipAiComponent> ent, EntityUid shipUid)
     {
@@ -165,10 +177,13 @@ public sealed class NsvShipAiSystem : EntitySystem
             if (!IsValidTarget(ent, shipUid, candidate, targetComp, ownPos, out var distSq))
                 continue;
 
-            // Closer is better; sticky bonus keeps us from flip-flopping between equidistant targets.
-            var score = -distSq;
+            // Threat value (longest weapon range of the target's grid) over squared distance.
+            // The offset keeps near-ties from flip-flopping when distances are tiny.
+            var targetGrid = Transform(candidate).GridUid;
+            var value = CalcWeaponRange(targetGrid ?? candidate);
+            var score = (value + 100f) / (distSq + ai.TargetDistanceOffset);
             if (candidate == ai.Target)
-                score *= 1f / ai.TargetStickiness;
+                score *= ai.TargetStickiness;
 
             if (score > bestScore)
             {
@@ -477,5 +492,77 @@ public sealed class NsvShipAiSystem : EntitySystem
     private static Vector2 NormalizedOrZero(Vector2 vec)
     {
         return vec.LengthSquared() == 0 ? Vector2.Zero : vec.Normalized();
+    }
+
+    /// <summary>
+    /// Pick the direction (from the target towards us) to establish our engagement position on.
+    /// With one dominant threat nearby we take the flank: rotate the away-from-threat direction
+    /// by orbitSign * 90 degrees, so multiple AI ships spread to different sides instead of
+    /// stacking on one approach vector. With no meaningful threat layout we keep whatever side
+    /// we're already on (approach straight along the current bearing).
+    /// </summary>
+    private Vector2? CalcAttackVector(Entity<NsvShipAiComponent> ent, EntityUid shipUid, EntityUid target)
+    {
+        var ai = ent.Comp;
+        var ownPos = _transform.GetMapCoordinates(Transform(ent));
+        var targetPos = _transform.GetMapCoordinates(target);
+        if (targetPos.MapId != ownPos.MapId)
+            return null;
+
+        var away = Vector2.Zero;
+        var threats = 0;
+
+        _threats.Clear();
+        _lookup.GetEntitiesInRange(ownPos, ai.ThreatMaxDistance, _threats);
+
+        foreach (var threat in _threats)
+        {
+            var candidate = threat.Owner;
+            if (candidate == ent.Owner || candidate == target || TerminatingOrDeleted(candidate))
+                continue;
+
+            if (Transform(candidate).GridUid == shipUid)
+                continue;
+
+            if (!_factions.IsHostile(ent.Owner, candidate))
+                continue;
+
+            var pos = _transform.GetMapCoordinates(candidate);
+            if (pos.MapId != ownPos.MapId)
+                continue;
+
+            var to = pos.Position - ownPos.Position;
+            var d = to.Length();
+            if (d <= 0f)
+                continue;
+
+            var w = 1f - MathF.Pow(d / ai.ThreatMaxDistance, ai.ThreatDistancePower);
+            away += to / d * w;
+            threats++;
+        }
+
+        _threats.Clear();
+
+        if (threats == 0)
+            return null;
+
+        var awayDir = NormalizedOrZero(away);
+        if (awayDir == Vector2.Zero)
+            return null;
+
+        // No other threats: pick the flank of the current target itself.
+        if (threats == 1)
+        {
+            var fromTarget = NormalizedOrZero(ownPos.Position - targetPos.Position);
+            if (fromTarget != Vector2.Zero)
+                awayDir = fromTarget;
+        }
+
+        // Rotate 90 degrees by the ship's fixed orbit handedness: perpendicular of awayDir.
+        var attackVec = new Vector2(-awayDir.Y, awayDir.X);
+        if (ai.OrbitSign < 0)
+            attackVec = -attackVec;
+
+        return NormalizedOrZero(attackVec);
     }
 }
