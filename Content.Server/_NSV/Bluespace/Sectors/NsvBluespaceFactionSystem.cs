@@ -31,6 +31,32 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
         return false;
     }
 
+    public bool EnableFactionMap(EntityUid entity)
+    {
+        if (Transform(entity).MapUid is not { Valid: true } mapUid)
+            return false;
+
+        if (!HasComp<NsvBluespaceSectorInstanceComponent>(mapUid))
+            EnsureComp<NsvBluespaceFactionMapComponent>(mapUid);
+
+        ReplanMap(mapUid);
+        return true;
+    }
+
+    public bool TryGetFactionMap(EntityUid entity, out EntityUid mapUid)
+    {
+        if (Transform(entity).MapUid is not { Valid: true } map ||
+            !HasComp<NsvBluespaceSectorInstanceComponent>(map) &&
+            !HasComp<NsvBluespaceFactionMapComponent>(map))
+        {
+            mapUid = EntityUid.Invalid;
+            return false;
+        }
+
+        mapUid = map;
+        return true;
+    }
+
     public bool TryGetSectorMap(
         EntityUid entity,
         out EntityUid mapUid,
@@ -57,8 +83,8 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
 
     public NsvBluespaceFactionRelation GetRelation(EntityUid source, EntityUid target)
     {
-        if (!TryGetSectorMap(source, out var sourceMap, out var sector) ||
-            !TryGetSectorMap(target, out var targetMap, out _) ||
+        if (!TryGetFactionMap(source, out var sourceMap) ||
+            !TryGetFactionMap(target, out var targetMap) ||
             sourceMap != targetMap ||
             !TryGetFaction(source, out var sourceFaction) ||
             !TryGetFaction(target, out var targetFaction))
@@ -66,7 +92,8 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
             return NsvBluespaceFactionRelation.Neutral;
         }
 
-        if (sector.RelationOverrides.TryGetValue(sourceFaction, out var overrides) &&
+        if (TryComp<NsvBluespaceSectorInstanceComponent>(sourceMap, out var sector) &&
+            sector.RelationOverrides.TryGetValue(sourceFaction, out var overrides) &&
             overrides.TryGetValue(targetFaction, out var relation))
         {
             return relation;
@@ -86,7 +113,7 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
     public bool SetFaction(EntityUid entity, ProtoId<NsvBluespaceFactionPrototype> faction)
     {
         if (!_prototypes.HasIndex<NsvBluespaceFactionPrototype>(faction) ||
-            !TryGetSectorMap(entity, out var mapUid, out _))
+            !TryGetFactionMap(entity, out var mapUid))
         {
             return false;
         }
@@ -96,20 +123,20 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
             return true;
 
         component.Faction = faction;
-        ReplanSector(mapUid);
+        ReplanMap(mapUid);
         return true;
     }
 
     public bool ClearFaction(EntityUid entity)
     {
-        if (!TryGetSectorMap(entity, out var mapUid, out _) ||
+        if (!TryGetFactionMap(entity, out var mapUid) ||
             !HasComp<NsvBluespaceFactionComponent>(entity))
         {
             return false;
         }
 
         RemComp<NsvBluespaceFactionComponent>(entity);
-        ReplanSector(mapUid);
+        ReplanMap(mapUid);
         return true;
     }
 
@@ -140,7 +167,7 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
             RemComp<NsvBluespaceFactionComponent>(entity);
         }
 
-        ReplanSector(sectorMap);
+        ReplanMap(sectorMap);
         return true;
     }
 
@@ -167,7 +194,7 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
             return true;
 
         overrides[target] = relation;
-        ReplanSector(sectorMap);
+        ReplanMap(sectorMap);
         return true;
     }
 
@@ -186,16 +213,16 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
         if (overrides.Count == 0)
             sector.RelationOverrides.Remove(source);
 
-        ReplanSector(sectorMap);
+        ReplanMap(sectorMap);
         return true;
     }
 
-    private void ReplanSector(EntityUid sectorMap)
+    private void ReplanMap(EntityUid mapUid)
     {
         var query = EntityQueryEnumerator<NsvBluespaceShipAiCoreComponent, HTNComponent>();
         while (query.MoveNext(out var uid, out _, out var htn))
         {
-            if (Transform(uid).MapUid != sectorMap)
+            if (Transform(uid).MapUid != mapUid)
                 continue;
 
             _npc.WakeNPC(uid, htn);

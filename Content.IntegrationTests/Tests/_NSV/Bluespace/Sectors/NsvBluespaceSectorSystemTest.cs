@@ -12,6 +12,7 @@ using Content.Shared.CCVar;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Robust.Server.GameObjects;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Prototypes;
 
@@ -20,6 +21,43 @@ namespace Content.IntegrationTests.Tests._NSV.Bluespace.Sectors;
 [TestFixture]
 public sealed class NsvBluespaceSectorSystemTest
 {
+    [Test]
+    public async Task EnablesFactionsOnOrdinaryMap()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var factions = entityManager.System<NsvBluespaceFactionSystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            var playerGrid = testMap.Grid.Owner;
+            var hostileGrid = mapManager.CreateGridEntity(testMap.MapId).Owner;
+            var federalGrid = mapManager.CreateGridEntity(testMap.MapId).Owner;
+
+            Assert.That(factions.SetFaction(playerGrid, "NSVPlayer"), Is.False);
+            Assert.That(factions.EnableFactionMap(playerGrid), Is.True);
+            Assert.That(factions.SetFaction(playerGrid, "NSVPlayer"), Is.True);
+            Assert.That(factions.SetFaction(hostileGrid, "NSVHostile"), Is.True);
+            Assert.That(factions.SetFaction(federalGrid, "NSVFederal"), Is.True);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(entityManager.HasComponent<NsvBluespaceFactionMapComponent>(testMap.MapUid), Is.True);
+                Assert.That(entityManager.HasComponent<NsvBluespaceSectorInstanceComponent>(testMap.MapUid), Is.False);
+                Assert.That(factions.IsHostile(playerGrid, hostileGrid), Is.True);
+                Assert.That(factions.IsHostile(hostileGrid, playerGrid), Is.True);
+                Assert.That(factions.IsHostile(federalGrid, hostileGrid), Is.True);
+                Assert.That(factions.IsHostile(hostileGrid, federalGrid), Is.True);
+                Assert.That(factions.IsHostile(playerGrid, federalGrid), Is.False);
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
     [Test]
     public async Task CreatesAndDisposesModularSector()
     {

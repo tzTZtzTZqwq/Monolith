@@ -10,9 +10,8 @@ using Robust.Shared.Utility;
 namespace Content.Server._NSV.Administration;
 
 /// <summary>
-/// Admin verbs to set the NSV bluespace faction of a grid (or any entity). Targeting a tile or
-/// anything on a ship resolves to that ship's grid. SetFaction requires the entity to be on a
-/// sector map, so on other maps the verbs report the failure instead of silently doing nothing.
+/// Admin verbs to enable NSV factions on a map and set the faction of a grid or entity. Targeting a
+/// tile or anything on a ship resolves to that ship's grid.
 /// </summary>
 public sealed class NsvFactionVerbSystem : EntitySystem
 {
@@ -48,6 +47,32 @@ public sealed class NsvFactionVerbSystem : EntitySystem
         var target = args.Target;
         if (Transform(target).GridUid is { } grid)
             target = grid;
+
+        if (Transform(target).MapUid is not { Valid: true } mapUid)
+            return;
+
+        if (!_factions.TryGetFactionMap(target, out _))
+        {
+            Verb enable = new()
+            {
+                Text = Loc.GetString("nsv-faction-verb-enable-map"),
+                Category = VerbCategory.Admin,
+                Icon = new SpriteSpecifier.Texture(new("/Textures/Interface/gavel.svg.192dpi.png")),
+                Impact = LogImpact.Medium,
+                Act = () =>
+                {
+                    if (_factions.EnableFactionMap(target))
+                    {
+                        _popup.PopupCursor(Loc.GetString("nsv-faction-map-enabled", ("map", Name(mapUid))), actor.PlayerSession);
+                        return;
+                    }
+
+                    _popup.PopupCursor($"Cannot enable NSV factions: {Name(target)} is not on a map.", actor.PlayerSession);
+                },
+            };
+            args.Verbs.Add(enable);
+            return;
+        }
 
         foreach (var (label, faction) in Options)
         {

@@ -13,6 +13,7 @@ using Content.Shared.Whitelist;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Spawners;
+using Robust.Shared.Timing;
 
 namespace Content.Server._NSV.NPC;
 
@@ -24,8 +25,8 @@ namespace Content.Server._NSV.NPC;
 /// and <see cref="ShipTargetingSystem"/> (per-gun ballistics, firing). It never touches thrusters,
 /// physics, or guns directly, so all of that battle-tested behavior is reused.
 ///
-/// This is intentionally simple for now (nearest hostile, single engage range). It is the seam where
-/// threat fields, shield/hull/engine awareness, and approach/brawl/retreat states will plug in.
+/// Tactical state and perception stay on <see cref="NsvShipAiComponent"/>; this system owns the
+/// decision cadence and translates those decisions into steering and targeting commands.
 /// </summary>
 public sealed class NsvShipAiSystem : EntitySystem
 {
@@ -36,30 +37,38 @@ public sealed class NsvShipAiSystem : EntitySystem
     [Dependency] private readonly ShipTargetingSystem _targeting = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly EntityWhitelistSystem _whitelist = default!;
+    [Dependency] private readonly IGameTiming _timing = default!;
 
     private const float PerceptionSpacing = 3f;
 
     private readonly HashSet<Entity<NsvShipTargetComponent>> _candidates = new();
     private readonly HashSet<Entity<NsvShipTargetComponent>> _threats = new();
+    private readonly HashSet<Entity<NsvShipAiComponent>> _fleetCandidates = new();
+    private readonly HashSet<EntityUid> _threatIdentities = new();
     private readonly HashSet<Entity<ShipShieldEmitterComponent>> _emitters = new();
     private readonly HashSet<Entity<FireControllableComponent>> _guns = new();
     private readonly List<Entity<NsvShipAiComponent>> _fleet = new();
+    private readonly Dictionary<EntityUid, int> _claimedTargets = new();
+    private readonly Dictionary<EntityUid, (TimeSpan Expires, float Range)> _weaponRangeCache = new();
 
     public override void Initialize()
     {
         base.Initialize();
 
-        SubscribeLocalEvent<NsvShipAiComponent, MapInitEvent>(OnMapInit);
+        SubscribeLocalEvent<NsvShipAiComponent, ComponentStartup>(OnStartup);
+        SubscribeLocalEvent<NsvShipAiComponent, ComponentShutdown>(OnShutdown);
     }
 
-    /// <summary>
-    /// This AI and HTN both drive the same steering/targeting; never let them coexist on one core.
-    /// Cores often inherit an HTN component from their Mono parent prototype, so strip it here.
-    /// </summary>
-    private void OnMapInit(Entity<NsvShipAiComponent> ent, ref MapInitEvent args)
+    private void OnStartup(Entity<NsvShipAiComponent> ent, ref ComponentStartup args)
     {
         if (HasComp<HTNComponent>(ent))
             RemComp<HTNComponent>(ent);
+    }
+
+    private void OnShutdown(Entity<NsvShipAiComponent> ent, ref ComponentShutdown args)
+    {
+        if (!TerminatingOrDeleted(ent))
+            ClearCommands(ent);
     }
 
     public override void Update(float frameTime)
@@ -69,8 +78,11 @@ public sealed class NsvShipAiSystem : EntitySystem
         while (query.MoveNext(out var uid, out var ai))
         {
             var shipUid = Transform(uid).GridUid;
-            if (shipUid == null)
+            if (shipUid == null || !this.IsPowered(uid, EntityManager))
+            {
+                Deactivate((uid, ai));
                 continue;
+            }
 
             // Test mode: spin in place instead of fighting (see TestSpinSpeed).
             if (ai.TestSpinSpeed is { } spinSpeed)
@@ -107,7 +119,9 @@ public sealed class NsvShipAiSystem : EntitySystem
 
             // Every frame: keep steering/targeting pointed at the live target position so leading and
             // avoidance stay accurate between decisions. Stop cleanly if the target is gone.
-            if (ai.Target is not { } target || TerminatingOrDeleted(target))
+            if (ai.Target is not { } target || TerminatingOrDeleted(target) ||
+                !TryComp<NsvShipTargetComponent>(target, out var targetComp) ||
+                targetComp.NeedPower && !this.IsPowered(target, EntityManager))
             {
                 ClearCommands(uid);
                 ai.Target = null;
@@ -131,7 +145,10 @@ public sealed class NsvShipAiSystem : EntitySystem
                 // Navigation point: the target itself, or a flank point orbiting it when the
                 // threat layout suggests an attack side.
                 var navCoords = targetCoords;
-                var attackVec = CalcAttackVector((uid, ai), target);
+                Vector2? attackVec = null;
+                if (ai.SteeringMode == ShipSteeringMode.GoToRange)
+                    attackVec = CalcAttackVector((uid, ai), target);
+
                 if (attackVec is { } vec)
                 {
                     var targetMap = _transform.GetMapCoordinates(target);
@@ -149,7 +166,7 @@ public sealed class NsvShipAiSystem : EntitySystem
                     steerer.AvoidProjectiles = ai.AvoidProjectiles;
                     steerer.TargetRotation = ai.TargetRotation;
                     steerer.Mode = ai.SteeringMode;
-                    steerer.FacingCoordinates = null;
+                    steerer.FacingCoordinates = attackVec != null && ai.AlwaysFaceTarget ? targetCoords : null;
                 }
             }
 
@@ -160,116 +177,121 @@ public sealed class NsvShipAiSystem : EntitySystem
     }
 
     /// <summary>
-    /// Implicit fleet assembly: every AI core on the same map with the same faction within
-    /// <see cref="NsvShipAiComponent.FleetRange"/>. Members are UID-sorted so each core derives a
-    /// stable slot index with no central fleet entity or membership bookkeeping — a ship dying
-    /// never reshuffles the surviving slots. The member list stays in <see cref="_fleet"/> for
-    /// the target de-prioritization in <see cref="Decide"/>; it is valid only until the next
-    /// core's decision (single-threaded, no reentrancy).
+    /// Builds this core's local fleet view. UID rank makes slot assignment deterministic, while
+    /// offsets recenter when membership changes.
     /// </summary>
     private void UpdateFleet(Entity<NsvShipAiComponent> ent)
     {
         var ai = ent.Comp;
         _fleet.Clear();
+        _fleetCandidates.Clear();
 
         if (_factions.TryGetFaction(ent, out var ownFaction))
         {
             var ownPos = _transform.GetMapCoordinates(Transform(ent));
+            _lookup.GetEntitiesInRange(ownPos, ai.FleetRange, _fleetCandidates);
 
-            var query = EntityQueryEnumerator<NsvShipAiComponent>();
-            while (query.MoveNext(out var mateUid, out var mateAi))
+            foreach (var mate in _fleetCandidates)
             {
-                if (mateUid == ent.Owner || TerminatingOrDeleted(mateUid))
+                if (mate.Owner == ent.Owner || TerminatingOrDeleted(mate) ||
+                    !this.IsPowered(mate.Owner, EntityManager))
+                {
+                    continue;
+                }
+
+                if (!_factions.TryGetFaction(mate, out var mateFaction) || mateFaction != ownFaction)
                     continue;
 
-                if (!_factions.TryGetFaction(mateUid, out var mateFaction) || mateFaction != ownFaction)
+                var matePos = _transform.GetMapCoordinates(Transform(mate));
+                if (matePos.MapId != ownPos.MapId ||
+                    (matePos.Position - ownPos.Position).LengthSquared() > ai.FleetRange * ai.FleetRange)
+                {
                     continue;
+                }
 
-                var matePos = _transform.GetMapCoordinates(Transform(mateUid));
-                if (matePos.MapId != ownPos.MapId)
-                    continue;
-
-                if ((matePos.Position - ownPos.Position).Length() > ai.FleetRange)
-                    continue;
-
-                _fleet.Add((mateUid, mateAi));
+                _fleet.Add(mate);
             }
         }
 
-        if (_fleet.Count == 0)
-        {
-            ai.FleetSize = 1;
-            ai.FleetIndex = 0;
-            ai.FleetAngleOffset = 0f;
-            return;
-        }
-
+        _fleetCandidates.Clear();
         _fleet.Add(ent);
-        _fleet.Sort((a, b) => a.Owner.CompareTo(b.Owner));
 
         ai.FleetSize = _fleet.Count;
-        ai.FleetIndex = _fleet.IndexOf(ent);
+        ai.FleetIndex = 0;
+        foreach (var mate in _fleet)
+        {
+            if (mate.Owner.Id < ent.Owner.Id)
+                ai.FleetIndex++;
+        }
 
         var offset = (ai.FleetIndex - (ai.FleetSize - 1) / 2f) * ai.FleetSpreadStep;
         ai.FleetAngleOffset = Math.Clamp(offset, -ai.FleetSpreadMax, ai.FleetSpreadMax);
     }
 
-    /// <summary>
-    /// Decision-tick threat scan: sum of toward-threat directions for hostiles other than the
-    /// current target (fleetmates are same-faction and never counted), cached for the per-frame
-    /// attack-vector composition. Moving the range query here keeps CalcAttackVector query-free.
-    /// </summary>
     private void ScanThreats(Entity<NsvShipAiComponent> ent, EntityUid shipUid)
     {
         var ai = ent.Comp;
-        var sum = Vector2.Zero;
-        var threats = 0;
+        var otherThreatSum = Vector2.Zero;
+        var withdrawSum = Vector2.Zero;
+        var otherThreats = 0;
         var ownPos = _transform.GetMapCoordinates(Transform(ent));
+        EntityUid? currentTargetIdentity = null;
+        if (ai.Target is { } currentTarget && TryGetTargetIdentity(currentTarget, out var identity))
+            currentTargetIdentity = identity;
 
         _threats.Clear();
+        _threatIdentities.Clear();
         _lookup.GetEntitiesInRange(ownPos, ai.ThreatMaxDistance, _threats);
 
-        foreach (var threat in _threats)
+        foreach (var (candidate, targetComp) in _threats)
         {
-            var candidate = threat.Owner;
-            if (candidate == ent.Owner || candidate == ai.Target || TerminatingOrDeleted(candidate))
+            if (!TryGetTargetOffset(ent, shipUid, candidate, targetComp, ownPos, ai.ThreatMaxDistance,
+                    out var offset, out var targetIdentity) ||
+                !_threatIdentities.Add(targetIdentity))
+            {
+                continue;
+            }
+
+            var distance = offset.Length();
+            if (distance <= 0f)
                 continue;
 
-            if (Transform(candidate).GridUid == shipUid)
+            var weightedDirection = offset / distance *
+                                    (1f - MathF.Pow(distance / ai.ThreatMaxDistance, ai.ThreatDistancePower));
+            withdrawSum -= weightedDirection;
+
+            if (targetIdentity == currentTargetIdentity)
                 continue;
 
-            if (!_factions.IsHostile(ent.Owner, candidate))
-                continue;
-
-            var pos = _transform.GetMapCoordinates(candidate);
-            if (pos.MapId != ownPos.MapId)
-                continue;
-
-            var to = pos.Position - ownPos.Position;
-            var d = to.Length();
-            if (d <= 0f)
-                continue;
-
-            var w = 1f - MathF.Pow(d / ai.ThreatMaxDistance, ai.ThreatDistancePower);
-            sum += to / d * w;
-            threats++;
+            otherThreatSum += weightedDirection;
+            otherThreats++;
         }
 
         _threats.Clear();
+        _threatIdentities.Clear();
 
-        ai.CachedOtherThreats = threats;
-        ai.CachedThreatDir = NormalizedOrZero(sum);
+        ai.CachedOtherThreats = otherThreats;
+        ai.CachedThreatDir = NormalizedOrZero(otherThreatSum);
+        ai.CachedWithdrawDir = NormalizedOrZero(withdrawSum);
     }
 
-    /// <summary>
-    /// Pick or keep a target. Threat value over squared distance wins (a heavily-armed distant
-    /// hostile can outrank a nearby gunboat), with stickiness toward the current one.
-    /// </summary>
     private void Decide(Entity<NsvShipAiComponent> ent, EntityUid shipUid)
     {
         var ai = ent.Comp;
-        var xform = Transform(ent);
-        var ownPos = _transform.GetMapCoordinates(xform);
+        var ownPos = _transform.GetMapCoordinates(Transform(ent));
+
+        _claimedTargets.Clear();
+        foreach (var mate in _fleet)
+        {
+            if (mate.Owner.Id >= ent.Owner.Id || mate.Comp.Target is not { } mateTarget ||
+                !TryGetTargetIdentity(mateTarget, out var targetIdentity))
+            {
+                continue;
+            }
+
+            _claimedTargets.TryGetValue(targetIdentity, out var claims);
+            _claimedTargets[targetIdentity] = claims + 1;
+        }
 
         _candidates.Clear();
         _lookup.GetEntitiesInRange(ownPos, ai.SearchRange, _candidates);
@@ -279,84 +301,98 @@ public sealed class NsvShipAiSystem : EntitySystem
 
         foreach (var (candidate, targetComp) in _candidates)
         {
-            if (!IsValidTarget(ent, shipUid, candidate, targetComp, ownPos, out var distSq))
+            if (!TryGetTargetOffset(ent, shipUid, candidate, targetComp, ownPos, ai.SearchRange,
+                    out var offset, out var targetIdentity))
+            {
                 continue;
+            }
 
-            // Threat value (longest weapon range of the target's grid) over squared distance.
-            // The offset keeps near-ties from flip-flopping when distances are tiny.
-            var targetGrid = Transform(candidate).GridUid;
-            var value = CalcWeaponRange(targetGrid ?? candidate);
-            var score = (value + 100f) / (distSq + ai.TargetDistanceOffset);
+            var value = GetCachedWeaponRange(targetIdentity);
+            var score = (value + 100f) / (offset.LengthSquared() + ai.TargetDistanceOffset);
             if (candidate == ai.Target)
                 score *= ai.TargetStickiness;
 
-            // Fleet target de-prioritization: candidates already claimed by a lower-UID
-            // fleetmate score lower. Lower-UID priority makes the distributed assignment
-            // deterministic — the claiming ship never sees its own target penalized, so
-            // ships yield in one direction instead of oscillating.
-            var claimed = 0;
-            foreach (var mate in _fleet)
-            {
-                if (mate.Owner == ent.Owner || mate.Comp.Target != candidate)
-                    continue;
-
-                if (mate.Owner.Id < ent.Owner.Id)
-                    claimed++;
-            }
-
-            if (claimed > 0)
+            if (_claimedTargets.TryGetValue(targetIdentity, out var claimed))
                 score /= 1f + claimed * ai.FleetTargetPenalty;
 
-            if (score > bestScore)
+            if (score > bestScore ||
+                score == bestScore && (best == null || candidate.Id < best.Value.Id))
             {
                 bestScore = score;
                 best = candidate;
             }
         }
 
+        _candidates.Clear();
+        _claimedTargets.Clear();
         ai.Target = best;
     }
 
-    private bool IsValidTarget(
+    private bool TryGetTargetOffset(
         Entity<NsvShipAiComponent> ent,
         EntityUid shipUid,
         EntityUid candidate,
         NsvShipTargetComponent targetComp,
         MapCoordinates ownPos,
-        out float distSq)
+        float maxDistance,
+        out Vector2 offset,
+        out EntityUid targetIdentity)
     {
-        distSq = float.MaxValue;
+        offset = default;
+        targetIdentity = candidate;
 
         if (TerminatingOrDeleted(candidate))
             return false;
 
         var targetXform = Transform(candidate);
         var targetGrid = targetXform.GridUid;
+        targetIdentity = targetGrid ?? candidate;
 
-        // same grid-mode rules the HTN query uses
         if (targetComp.NeedGrid != NsvShipTargetGridMode.Either &&
             (targetComp.NeedGrid == NsvShipTargetGridMode.OnGrid) == (targetGrid == null))
+        {
+            return false;
+        }
+
+        if (targetGrid == shipUid ||
+            targetComp.NeedPower && !this.IsPowered(candidate, EntityManager) ||
+            targetGrid != null && _whitelist.IsBlacklistPass(ent.Comp.Blacklist, targetGrid.Value))
+        {
+            return false;
+        }
+
+        var targetPos = _transform.GetMapCoordinates(targetXform);
+        if (targetPos.MapId != ownPos.MapId || !_factions.IsHostile(ent.Owner, candidate))
             return false;
 
-        // never target our own ship
-        if (targetGrid == shipUid)
+        offset = targetPos.Position - ownPos.Position;
+        return offset.LengthSquared() <= maxDistance * maxDistance;
+    }
+
+    private bool TryGetTargetIdentity(EntityUid target, out EntityUid identity)
+    {
+        identity = target;
+        if (TerminatingOrDeleted(target) || !TryComp<TransformComponent>(target, out var xform))
             return false;
 
-        if (targetComp.NeedPower && !this.IsPowered(candidate, EntityManager))
-            return false;
+        identity = xform.GridUid ?? target;
+        return true;
+    }
 
-        if (targetGrid != null && _whitelist.IsBlacklistPass(ent.Comp.Blacklist, targetGrid.Value))
-            return false;
+    private void Deactivate(Entity<NsvShipAiComponent> ent)
+    {
+        ClearCommands(ent);
 
-        if (!_factions.IsHostile(ent.Owner, candidate))
-            return false;
-
-        var targetPos = _transform.GetMapCoordinates(candidate);
-        if (targetPos.MapId != ownPos.MapId)
-            return false;
-
-        distSq = (targetPos.Position - ownPos.Position).LengthSquared();
-        return distSq <= ent.Comp.SearchRange * ent.Comp.SearchRange;
+        var ai = ent.Comp;
+        ai.Target = null;
+        ai.DecisionAccumulator = 0f;
+        ai.PerceptionAccum = 0f;
+        ai.FleetIndex = 0;
+        ai.FleetSize = 1;
+        ai.FleetAngleOffset = 0f;
+        ai.CachedThreatDir = Vector2.Zero;
+        ai.CachedWithdrawDir = Vector2.Zero;
+        ai.CachedOtherThreats = 0;
     }
 
     private void ClearCommands(EntityUid uid)
@@ -468,6 +504,8 @@ public sealed class NsvShipAiSystem : EntitySystem
         var ai = ent.Comp;
         ai.CachedShieldStress = CalcShieldStress(shipUid);
         ai.CachedWeaponRange = CalcWeaponRange(shipUid);
+        _weaponRangeCache[shipUid] = (_timing.CurTime + TimeSpan.FromSeconds(PerceptionSpacing),
+            ai.CachedWeaponRange);
 
         ai.Blackboard.SetValue(NsvAiKeys.ShieldStress, ai.CachedShieldStress);
         ai.Blackboard.SetValue(NsvAiKeys.WeaponRange, ai.CachedWeaponRange);
@@ -502,6 +540,19 @@ public sealed class NsvShipAiSystem : EntitySystem
         return Math.Clamp(stress, 0f, 1f);
     }
 
+    private float GetCachedWeaponRange(EntityUid shipUid)
+    {
+        if (_weaponRangeCache.TryGetValue(shipUid, out var cached) && cached.Expires > _timing.CurTime)
+            return cached.Range;
+
+        if (_weaponRangeCache.Count > 256)
+            _weaponRangeCache.Clear();
+
+        var range = CalcWeaponRange(shipUid);
+        _weaponRangeCache[shipUid] = (_timing.CurTime + TimeSpan.FromSeconds(PerceptionSpacing), range);
+        return range;
+    }
+
     /// <summary>
     /// Longest weapon range on the grid in meters: hitscan reads its raycast max distance,
     /// projectiles get muzzle speed times despawn lifetime. 0 = no scannable weapons.
@@ -523,15 +574,16 @@ public sealed class NsvShipAiSystem : EntitySystem
             if (!_gun.TryNextShootPrototype((gunEnt, gun), out var proto))
                 continue;
 
+            var bulletProto = _gun.GetBulletPrototype(proto);
             float range;
-            if (proto.TryGetComponent<HitscanAmmoComponent>(out _, Factory))
+            if (bulletProto.TryGetComponent<HitscanAmmoComponent>(out _, Factory))
             {
-                if (!proto.TryGetComponent<HitscanBasicRaycastComponent>(out var raycast, Factory))
+                if (!bulletProto.TryGetComponent<HitscanBasicRaycastComponent>(out var raycast, Factory))
                     continue;
 
                 range = raycast.MaxDistance;
             }
-            else if (proto.TryGetComponent<TimedDespawnComponent>(out var despawn, Factory))
+            else if (bulletProto.TryGetComponent<TimedDespawnComponent>(out var despawn, Factory))
             {
                 range = gun.ProjectileSpeedModified * despawn.Lifetime;
             }
@@ -547,50 +599,14 @@ public sealed class NsvShipAiSystem : EntitySystem
         return best;
     }
 
-    /// <summary>
-    /// Withdrawal steering: build a threat vector from every hostile in range (weight falls off
-    /// with distance) and navigate along its inverse, while <see cref="ShipSteererComponent.FacingCoordinates"/>
-    /// keeps the nose on the current target so the ship fights while retreating. This is the
-    /// keep-distance pattern with hostile ships as the repulsion source.
-    /// </summary>
     private void SteerWithdraw(Entity<NsvShipAiComponent> ent, EntityCoordinates targetCoords)
     {
         var ai = ent.Comp;
         var ownPos = _transform.GetMapCoordinates(Transform(ent));
-        var away = Vector2.Zero;
-
-        _threats.Clear();
-        _lookup.GetEntitiesInRange(ownPos, ai.ThreatMaxDistance, _threats);
-
-        foreach (var threat in _threats)
-        {
-            var candidate = threat.Owner;
-            if (candidate == ent.Owner || TerminatingOrDeleted(candidate))
-                continue;
-
-            if (!_factions.IsHostile(ent.Owner, candidate))
-                continue;
-
-            var pos = _transform.GetMapCoordinates(candidate);
-            if (pos.MapId != ownPos.MapId)
-                continue;
-
-            var to = pos.Position - ownPos.Position;
-            var d = to.Length();
-            if (d <= 0f)
-                continue;
-
-            var w = 1f - MathF.Pow(d / ai.ThreatMaxDistance, ai.ThreatDistancePower);
-            away -= to / d * w;
-        }
-
-        _threats.Clear();
-
-        var awayDir = away.LengthSquared() > 0f
-            ? away.Normalized()
+        var awayDir = ai.CachedWithdrawDir != Vector2.Zero
+            ? ai.CachedWithdrawDir
             : NormalizedOrZero(ownPos.Position - _transform.GetMapCoordinates(targetCoords.EntityId).Position);
 
-        // No withdraw direction available (no hostiles, target on top of us): stand and fight.
         if (awayDir == Vector2.Zero)
             return;
 

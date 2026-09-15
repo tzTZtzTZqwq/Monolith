@@ -64,8 +64,8 @@ public sealed partial class NsvShipAiComponent : Component
     public ShipSteeringMode SteeringMode = ShipSteeringMode.GoToRange;
 
     /// <summary>
-    /// Facing offset relative to the movement direction, in degrees. 0 = nose on target,
-    /// 90 = broadside.
+    /// Facing offset relative to the steering system's chosen facing, in degrees.
+    /// With <see cref="AlwaysFaceTarget"/>, 0 = nose on target and 90 = broadside.
     /// </summary>
     [DataField]
     public float TargetRotation = 0f;
@@ -243,8 +243,14 @@ public sealed partial class NsvShipAiComponent : Component
     public Vector2 CachedThreatDir;
 
     /// <summary>
-    /// Hostiles within <see cref="ThreatMaxDistance"/> other than the current target, counted
-    /// each decision tick. Drives the attack-vector base direction choice.
+    /// Normalized direction away from valid hostile grids, refreshed each decision tick.
+    /// </summary>
+    [ViewVariables]
+    public Vector2 CachedWithdrawDir;
+
+    /// <summary>
+    /// Distinct hostile grids within <see cref="ThreatMaxDistance"/> other than the current target,
+    /// counted each decision tick. Drives the attack-vector base direction choice.
     /// </summary>
     [ViewVariables]
     public int CachedOtherThreats;

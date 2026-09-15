@@ -154,6 +154,7 @@
       - ShuttleAIIgnore
   - type: NsvBluespaceShipAiCore
   - type: NsvShipTarget
+    needPower: true
 
 # Broadside variant of the standalone AI, defined purely in data: orbit the target clockwise
 # at 450m with the ship's flank towards it. No code differs from NsvBluespaceStandaloneCore.

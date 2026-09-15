@@ -1,8 +1,10 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using Content.Server._Mono.NPC.HTN;
 using Content.Server._NSV.Bluespace.Sectors;
 using Content.Server._NSV.NPC;
+using Content.Server.Power.Components;
 using Content.IntegrationTests.Pair;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Robust.Shared.GameObjects;
@@ -21,7 +23,9 @@ namespace Content.IntegrationTests.Tests._NSV.NPC;
 public sealed class NsvShipAiFleetTest
 {
     private const string CorePrototype = "NsvShipAiFleetTestCore";
+    private const string PoweredCorePrototype = "NsvShipAiFleetTestPoweredCore";
     private const string TargetPrototype = "NsvShipAiFleetTestTarget";
+    private const string PoweredTargetPrototype = "NsvShipAiFleetTestPoweredTarget";
 
     [TestPrototypes]
     private const string Prototypes = $@"
@@ -32,9 +36,25 @@ public sealed class NsvShipAiFleetTest
     decisionInterval: 0.05
 
 - type: entity
+  id: {PoweredCorePrototype}
+  components:
+  - type: NsvShipAi
+    decisionInterval: 0.05
+  - type: NsvShipTarget
+    needPower: true
+  - type: ApcPowerReceiver
+
+- type: entity
   id: {TargetPrototype}
   components:
   - type: NsvShipTarget
+
+- type: entity
+  id: {PoweredTargetPrototype}
+  components:
+  - type: NsvShipTarget
+    needPower: true
+  - type: ApcPowerReceiver
 ";
 
     private Entity<MapGridComponent> CreateGrid(
@@ -182,6 +202,8 @@ public sealed class NsvShipAiFleetTest
                 var grid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, new Vector2(200f, (i - 0.5f) * 100f));
                 Assert.That(factions.SetFaction(grid.Owner, "NSVPlayer"), Is.True);
                 targets.Add(entityManager.SpawnEntity(TargetPrototype, new EntityCoordinates(grid.Owner, 0, 0)));
+                if (i == 0)
+                    entityManager.SpawnEntity(TargetPrototype, new EntityCoordinates(grid.Owner, 0, 0));
             }
         });
         await pair.RunTicksSync(30);
@@ -197,9 +219,131 @@ public sealed class NsvShipAiFleetTest
                 Assert.That(second.FleetSize, Is.EqualTo(2));
                 Assert.That(first.Target, Is.Not.Null);
                 Assert.That(second.Target, Is.Not.Null);
-                Assert.That(first.Target, Is.Not.EqualTo(second.Target),
-                    "Fleet members must not both focus the same equivalent target.");
+                Assert.That(entityManager.GetComponent<TransformComponent>(first.Target!.Value).GridUid,
+                    Is.Not.EqualTo(entityManager.GetComponent<TransformComponent>(second.Target!.Value).GridUid),
+                    "Fleet claims must apply to the target grid, not just one marker entity on it.");
+
+                var firstSteerer = entityManager.GetComponent<ShipSteererComponent>(cores[0]);
+                Assert.That(firstSteerer.FacingCoordinates?.EntityId, Is.EqualTo(first.Target),
+                    "A ship navigating to a flank waypoint must keep facing its combat target.");
             });
+        });
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task UnpoweredCoreDoesNotRunOrJoinFleet()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.EntMan;
+        var factions = server.System<NsvBluespaceFactionSystem>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var mapSystem = server.System<SharedMapSystem>();
+        var transform = server.System<SharedTransformSystem>();
+        EntityUid poweredCore = default;
+        EntityUid unpoweredCore = default;
+
+        await server.WaitPost(() =>
+        {
+            entityManager.EnsureComponent<NsvBluespaceSectorInstanceComponent>(testMap.MapUid);
+
+            var poweredGrid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, new Vector2(-200f, 0f));
+            Assert.That(factions.SetFaction(poweredGrid.Owner, "NSVHostile"), Is.True);
+            poweredCore = entityManager.SpawnEntity(CorePrototype, new EntityCoordinates(poweredGrid.Owner, 0, 0));
+
+            var unpoweredGrid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, new Vector2(-100f, 0f));
+            Assert.That(factions.SetFaction(unpoweredGrid.Owner, "NSVHostile"), Is.True);
+            unpoweredCore = entityManager.SpawnEntity(PoweredCorePrototype, new EntityCoordinates(unpoweredGrid.Owner, 0, 0));
+
+            var enemyGrid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, new Vector2(200f, 0f));
+            Assert.That(factions.SetFaction(enemyGrid.Owner, "NSVPlayer"), Is.True);
+            entityManager.SpawnEntity(TargetPrototype, new EntityCoordinates(enemyGrid.Owner, 0, 0));
+        });
+        await pair.RunTicksSync(10);
+
+        await server.WaitAssertion(() =>
+        {
+            var activeAi = entityManager.GetComponent<NsvShipAiComponent>(poweredCore);
+            var inactiveAi = entityManager.GetComponent<NsvShipAiComponent>(unpoweredCore);
+            Assert.Multiple(() =>
+            {
+                Assert.That(entityManager.GetComponent<ApcPowerReceiverComponent>(unpoweredCore).Powered, Is.False);
+                Assert.That(activeAi.FleetSize, Is.EqualTo(1));
+                Assert.That(inactiveAi.FleetSize, Is.EqualTo(1));
+                Assert.That(inactiveAi.Target, Is.Null);
+                Assert.That(entityManager.HasComponent<ShipSteererComponent>(unpoweredCore), Is.False);
+                Assert.That(entityManager.HasComponent<ShipTargetingComponent>(unpoweredCore), Is.False);
+            });
+        });
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task UnpoweredTargetIsSkipped()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.EntMan;
+        var factions = server.System<NsvBluespaceFactionSystem>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var mapSystem = server.System<SharedMapSystem>();
+        var transform = server.System<SharedTransformSystem>();
+        EntityUid core = default;
+        EntityUid validTarget = default;
+
+        await server.WaitPost(() =>
+        {
+            entityManager.EnsureComponent<NsvBluespaceSectorInstanceComponent>(testMap.MapUid);
+
+            var ownGrid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, new Vector2(-200f, 0f));
+            Assert.That(factions.SetFaction(ownGrid.Owner, "NSVHostile"), Is.True);
+            core = entityManager.SpawnEntity(CorePrototype, new EntityCoordinates(ownGrid.Owner, 0, 0));
+
+            var unpoweredGrid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, Vector2.Zero);
+            Assert.That(factions.SetFaction(unpoweredGrid.Owner, "NSVPlayer"), Is.True);
+            entityManager.SpawnEntity(PoweredTargetPrototype, new EntityCoordinates(unpoweredGrid.Owner, 0, 0));
+
+            var validGrid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, new Vector2(200f, 0f));
+            Assert.That(factions.SetFaction(validGrid.Owner, "NSVPlayer"), Is.True);
+            validTarget = entityManager.SpawnEntity(TargetPrototype, new EntityCoordinates(validGrid.Owner, 0, 0));
+        });
+        await pair.RunTicksSync(10);
+
+        await server.WaitAssertion(() =>
+        {
+            var ai = entityManager.GetComponent<NsvShipAiComponent>(core);
+            Assert.That(ai.Target, Is.EqualTo(validTarget));
+        });
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task CartridgeWeaponRangeUsesProjectileLifetime()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.EntMan;
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var mapSystem = server.System<SharedMapSystem>();
+        var transform = server.System<SharedTransformSystem>();
+        EntityUid core = default;
+
+        await server.WaitPost(() =>
+        {
+            var grid = CreateGrid(entityManager, mapManager, mapSystem, transform, testMap.MapId, Vector2.Zero);
+            core = entityManager.SpawnEntity(CorePrototype, new EntityCoordinates(grid.Owner, 0, 0));
+            entityManager.SpawnEntity("WeaponTurretL85Autocannon", new EntityCoordinates(grid.Owner, 0, 0));
+        });
+        await pair.RunTicksSync(10);
+
+        await server.WaitAssertion(() =>
+        {
+            var ai = entityManager.GetComponent<NsvShipAiComponent>(core);
+            Assert.That(ai.CachedWeaponRange, Is.EqualTo(384f).Within(0.01f));
         });
         await pair.CleanReturnAsync();
     }
