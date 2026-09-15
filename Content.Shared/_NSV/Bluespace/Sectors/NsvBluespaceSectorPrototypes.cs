@@ -24,6 +24,12 @@ public sealed partial class NsvBluespaceSectorTemplatePrototype : IPrototype
     public float EntrySafeRadius = 200f;
 
     [DataField]
+    public float? ShipAiLeashRadius;
+
+    [DataField]
+    public float ShipAiLeashStrength = 0.6f;
+
+    [DataField]
     public List<ProtoId<NsvBluespaceSectorModulePrototype>> Modules = new();
 }
 

@@ -5,6 +5,7 @@ using Content.Server._Mono.FireControl;
 using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server._NSV.Bluespace.Sectors;
 using Content.Server._NSV.Bluespace.Sectors.Generators;
+using Content.Server._NSV.NPC;
 using Content.Server._NSV.NPC.HTN;
 using Content.Server.NPC.HTN;
 using Content.Server.Spawners.Components;
@@ -42,11 +43,14 @@ public sealed class NsvBluespaceSectorSystemTest
             Assert.That(factions.SetFaction(playerGrid, "NSVPlayer"), Is.True);
             Assert.That(factions.SetFaction(hostileGrid, "NSVHostile"), Is.True);
             Assert.That(factions.SetFaction(federalGrid, "NSVFederal"), Is.True);
+            var leash = entityManager.GetComponent<NsvShipAiMapComponent>(testMap.MapUid);
 
             Assert.Multiple(() =>
             {
                 Assert.That(entityManager.HasComponent<NsvBluespaceFactionMapComponent>(testMap.MapUid), Is.True);
                 Assert.That(entityManager.HasComponent<NsvBluespaceSectorInstanceComponent>(testMap.MapUid), Is.False);
+                Assert.That(leash.LeashRadius, Is.EqualTo(3000f));
+                Assert.That(leash.LeashStrength, Is.EqualTo(0.6f));
                 Assert.That(factions.IsHostile(playerGrid, hostileGrid), Is.True);
                 Assert.That(factions.IsHostile(hostileGrid, playerGrid), Is.True);
                 Assert.That(factions.IsHostile(federalGrid, hostileGrid), Is.True);
@@ -76,6 +80,7 @@ public sealed class NsvBluespaceSectorSystemTest
                 failure ?? "No sector creation failure reason was returned.");
 
             var instance = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(mapUid);
+            var leash = entityManager.GetComponent<NsvShipAiMapComponent>(mapUid);
             var hostileGrids = instance.OwnedGrids.Where(grid =>
                 entityManager.GetComponent<NsvBluespaceFactionComponent>(grid).Faction.ToString() == "NSVHostile").ToHashSet();
             var nsvAiCores = 0;
@@ -121,6 +126,8 @@ public sealed class NsvBluespaceSectorSystemTest
             Assert.Multiple(() =>
             {
                 Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Ready));
+                Assert.That(leash.LeashRadius, Is.EqualTo(3000f));
+                Assert.That(leash.LeashStrength, Is.EqualTo(0.6f));
                 Assert.That(instance.OwnedGrids.Count, Is.GreaterThanOrEqualTo(2));
                 Assert.That(instance.OwnedEntities, Is.Not.Empty);
                 Assert.That(instance.OwnedGrids.All(entityManager.HasComponent<MapGridComponent>), Is.True);

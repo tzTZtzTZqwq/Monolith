@@ -123,8 +123,10 @@ public sealed class NsvShipAiSystem : EntitySystem
                 !TryComp<NsvShipTargetComponent>(target, out var targetComp) ||
                 targetComp.NeedPower && !this.IsPowered(target, EntityManager))
             {
-                ClearCommands(uid);
                 ai.Target = null;
+                _targeting.Stop(uid);
+                if (!SteerToMapCenter((uid, ai)))
+                    _steering.Stop(uid);
                 continue;
             }
 
@@ -140,7 +142,8 @@ public sealed class NsvShipAiSystem : EntitySystem
             {
                 var engage = ai.EngageRange;
                 if (ai.AutoEngageRange && ai.CachedWeaponRange > 0f)
-                    engage = ai.CachedWeaponRange * ai.RangeScale + ai.CachedShieldStress * ai.StressRangeBonus;
+                    engage = ai.CachedWeaponRange *
+                        (ai.RangeScale + ai.CachedShieldStress * ai.StressRangeScale);
 
                 // Navigation point: the target itself, or a flank point orbiting it when the
                 // threat layout suggests an attack side.
@@ -156,17 +159,20 @@ public sealed class NsvShipAiSystem : EntitySystem
                         new MapCoordinates(targetMap.Position + vec * engage, targetMap.MapId));
                 }
 
+                var leashActive = ApplyMapLeash(uid, ref navCoords);
                 var steerer = _steering.Steer(uid, navCoords);
                 if (steerer != null)
                 {
-                    steerer.Range = attackVec != null ? 1f : engage;
+                    steerer.Range = attackVec != null || leashActive ? 1f : engage;
                     steerer.RangeTolerance = ai.EngageRangeTolerance;
                     steerer.InRangeMaxSpeed = ai.InRangeMaxSpeed;
                     steerer.AlwaysFaceTarget = ai.AlwaysFaceTarget;
                     steerer.AvoidProjectiles = ai.AvoidProjectiles;
                     steerer.TargetRotation = ai.TargetRotation;
-                    steerer.Mode = ai.SteeringMode;
-                    steerer.FacingCoordinates = attackVec != null && ai.AlwaysFaceTarget ? targetCoords : null;
+                    steerer.Mode = leashActive ? ShipSteeringMode.GoToRange : ai.SteeringMode;
+                    steerer.FacingCoordinates = (attackVec != null || leashActive) && ai.AlwaysFaceTarget
+                        ? targetCoords
+                        : null;
                 }
             }
 
@@ -599,6 +605,68 @@ public sealed class NsvShipAiSystem : EntitySystem
         return best;
     }
 
+    private bool TryGetActiveMapLeash(
+        EntityUid uid,
+        out MapCoordinates ownPos,
+        out float radius,
+        out float strength)
+    {
+        ownPos = _transform.GetMapCoordinates(Transform(uid));
+        radius = 0f;
+        strength = 0f;
+
+        if (Transform(uid).MapUid is not { } mapUid ||
+            !TryComp<NsvShipAiMapComponent>(mapUid, out var leash) ||
+            leash.LeashRadius is not { } leashRadius ||
+            leashRadius <= 0f ||
+            leash.LeashStrength <= 0f ||
+            ownPos.Position.LengthSquared() <= leashRadius * leashRadius)
+        {
+            return false;
+        }
+
+        radius = leashRadius;
+        strength = leash.LeashStrength;
+        return true;
+    }
+
+    private bool ApplyMapLeash(EntityUid uid, ref EntityCoordinates navCoords)
+    {
+        if (!TryGetActiveMapLeash(uid, out var ownPos, out var radius, out var strength))
+            return false;
+
+        var navPos = _transform.ToMapCoordinates(navCoords);
+        if (navPos.MapId != ownPos.MapId)
+            return false;
+
+        var distance = ownPos.Position.Length();
+        var leashWeight = Math.Clamp(strength * (distance - radius) / radius, 0f, 1f);
+        var waypoint = Vector2.Lerp(navPos.Position, Vector2.Zero, leashWeight);
+        navCoords = _transform.ToCoordinates(new MapCoordinates(waypoint, ownPos.MapId));
+        return true;
+    }
+
+    private bool SteerToMapCenter(Entity<NsvShipAiComponent> ent)
+    {
+        if (!TryGetActiveMapLeash(ent.Owner, out var ownPos, out var radius, out _))
+            return false;
+
+        var center = _transform.ToCoordinates(new MapCoordinates(Vector2.Zero, ownPos.MapId));
+        var steerer = _steering.Steer(ent.Owner, center);
+        if (steerer == null)
+            return false;
+
+        steerer.Range = radius;
+        steerer.RangeTolerance = null;
+        steerer.InRangeMaxSpeed = ent.Comp.InRangeMaxSpeed;
+        steerer.AlwaysFaceTarget = false;
+        steerer.AvoidProjectiles = ent.Comp.AvoidProjectiles;
+        steerer.TargetRotation = 0f;
+        steerer.Mode = ShipSteeringMode.GoToRange;
+        steerer.FacingCoordinates = null;
+        return true;
+    }
+
     private void SteerWithdraw(Entity<NsvShipAiComponent> ent, EntityCoordinates targetCoords)
     {
         var ai = ent.Comp;
@@ -612,6 +680,7 @@ public sealed class NsvShipAiSystem : EntitySystem
 
         var waypoint = _transform.ToCoordinates(
             new MapCoordinates(ownPos.Position + awayDir * ai.WithdrawDistance, ownPos.MapId));
+        ApplyMapLeash(ent.Owner, ref waypoint);
 
         var steerer = _steering.Steer(ent.Owner, waypoint);
         if (steerer != null)

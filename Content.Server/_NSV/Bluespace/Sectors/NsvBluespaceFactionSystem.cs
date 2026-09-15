@@ -1,3 +1,4 @@
+using Content.Server._NSV.NPC;
 using Content.Server.NPC.HTN;
 using Content.Server.NPC.Systems;
 using Content.Shared._NSV.Bluespace.Sectors;
@@ -8,6 +9,8 @@ namespace Content.Server._NSV.Bluespace.Sectors;
 
 public sealed class NsvBluespaceFactionSystem : EntitySystem
 {
+    private const float DefaultShipAiLeashRadius = 3000f;
+
     [Dependency] private HTNSystem _htn = default!;
     [Dependency] private NPCSystem _npc = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
@@ -38,6 +41,9 @@ public sealed class NsvBluespaceFactionSystem : EntitySystem
 
         if (!HasComp<NsvBluespaceSectorInstanceComponent>(mapUid))
             EnsureComp<NsvBluespaceFactionMapComponent>(mapUid);
+
+        var leash = EnsureComp<NsvShipAiMapComponent>(mapUid);
+        leash.LeashRadius ??= DefaultShipAiLeashRadius;
 
         ReplanMap(mapUid);
         return true;

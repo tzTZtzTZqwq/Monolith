@@ -65,7 +65,7 @@ JS v6 决策链:**分群 → 选目标 → 威胁向量 → 疲劳/撤退 → �
    - `GetWeaponRange(grid)`:扫 `FireControllableComponent`,hitscan 读 `MaxDistance`,抛射物=弹速×存活时间,返回最短/最长/代表值
 2. **软撤退状态**(组件加运行时字段,或用 blackboard + `NsvAiKeys`):
    - `stress = max(shieldStress, 1-hullFraction)` 之类合成
-   - 交战距离动态化:`engageRange = weaponRange × RangeScale + stress × StressRangeBonus`(JS §5 公式的直译,性格系数后置)
+   - 交战距离动态化:`engageRange = weaponRange × (RangeScale + stress × StressRangeScale)`(默认系数为 `0.6 + 0.45 × stress`;在 0.85 撤退阈值前最高约 0.9825)
    - 阈值以上切 withdraw:复用保距测试的合成向量逻辑,斥力源换成 threat 集合(`wᵢ=(1-(d/D)^p)×权`),`FacingCoordinates` 仍指目标(边退边打)
 3. **weaponRange 集成**:替换 `EngageRange` 默认值的来源(保留 DataField 显式覆盖能力)
 4. 验证:admin 实战场景,手动打盾/打船,观察渐进拉距与撤退
@@ -93,7 +93,7 @@ JS v6 决策链:**分群 → 选目标 → 威胁向量 → 疲劳/撤退 → �
 
 ## 5. 风险与注意
 
-- **数值重标定**:JS 全部 px 量纲,直接抄必错;先定"我们的 1v1 标准场景"再标定 baseRangeScale、stressRangeBonus、threat.maxDistance
+- **数值重标定**:JS 全部 px 量纲,直接抄必错;先定"我们的 1v1 标准场景"再标定 RangeScale、StressRangeScale、ThreatMaxDistance
 - **敌方全知**:护盾/hull 读取对敌 grid 同样无限制,AI 读敌方 stress 属作弊读数;P1 限读自己 grid,敌方状态用命中情况推断(公平性优先)
 - **性能**:感知全部 3s 缓存,威胁向量每帧只算向量合成(已是 O(敌舰数) 量级)
 - **`_Mono` 边界**:本计划不动 `_Mono` 的 steering/targeting(除已合入的 FacingCoordinates);需要新运动原语时优先路 A(AI 喂航点),路 B(新 Mode)需单独立项

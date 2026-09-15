@@ -85,23 +85,22 @@ public sealed partial class NsvShipAiComponent : Component
     /// <summary>
     /// Derive the engagement range from the ship's own longest weapon range plus shield stress
     /// instead of the fixed <see cref="EngageRange"/>:
-    /// range = WeaponRange * <see cref="RangeScale"/> + stress * <see cref="StressRangeBonus"/>.
+    /// range = WeaponRange * (<see cref="RangeScale"/> + stress * <see cref="StressRangeScale"/>).
     /// </summary>
     [DataField]
     public bool AutoEngageRange = true;
 
     /// <summary>
-    /// Fraction of the longest weapon's range to hold as the base engagement distance.
+    /// Fraction of the longest weapon's range held with no shield stress.
     /// </summary>
     [DataField]
-    public float RangeScale = 0.8f;
+    public float RangeScale = 0.6f;
 
     /// <summary>
-    /// Extra engagement distance added linearly with shield stress (0..1). Soft retreat: the AI
-    /// drifts further out as its shields fail before switching to full withdrawal.
+    /// Additional fraction of weapon range held at maximum shield stress.
     /// </summary>
     [DataField]
-    public float StressRangeBonus = 250f;
+    public float StressRangeScale = 0.45f;
 
     /// <summary>
     /// Shield stress (0..1) at which the AI stops maneuvering for advantage and withdraws.
@@ -283,4 +282,20 @@ public sealed partial class NsvShipAiComponent : Component
     /// </summary>
     [DataField("blackboard", customTypeSerializer: typeof(NPCBlackboardSerializer))]
     public NPCBlackboard Blackboard = new();
+}
+
+[RegisterComponent]
+public sealed partial class NsvShipAiMapComponent : Component
+{
+    /// <summary>
+    /// Distance from map coordinate zero where ship AI starts receiving an inward steering bias.
+    /// Null disables the leash for this map.
+    /// </summary>
+    [DataField]
+    [ViewVariables(VVAccess.ReadWrite)]
+    public float? LeashRadius;
+
+    [DataField]
+    [ViewVariables(VVAccess.ReadWrite)]
+    public float LeashStrength = 0.6f;
 }

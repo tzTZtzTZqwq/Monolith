@@ -1,6 +1,7 @@
 using System.Linq;
 using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server._NSV.Bluespace.Sectors.Generators;
+using Content.Server._NSV.NPC;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared._NSV.Bluespace.Starmap;
 using Robust.Server.GameObjects;
@@ -158,6 +159,13 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
         instance.Seed = seed;
         instance.State = NsvBluespaceSectorState.Applying;
         instance.MapId = mapId;
+        if (template.ShipAiLeashRadius is { } leashRadius)
+        {
+            var leash = EnsureComp<NsvShipAiMapComponent>(mapUid);
+            leash.LeashRadius = leashRadius;
+            leash.LeashStrength = template.ShipAiLeashStrength;
+        }
+
         activeSectors[key] = mapUid;
         _factions.SetSectorRelation(mapUid, "NSVHostile", "NSVPlayer", NsvBluespaceFactionRelation.Hostile);
 
