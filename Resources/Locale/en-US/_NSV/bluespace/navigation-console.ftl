@@ -37,6 +37,7 @@ nsv-bluespace-console-sector-status-applying = Preparing
 nsv-bluespace-console-sector-status-ready = Ready
 nsv-bluespace-console-sector-status-preparing-sleep = Preparing sleep
 nsv-bluespace-console-sector-status-sleeping = Sleeping
+nsv-bluespace-console-sector-status-waking = Waking
 nsv-bluespace-console-sector-status-draining = Draining
 nsv-bluespace-console-sector-status-failed = Unavailable
 nsv-bluespace-console-encounter-none = No active encounter

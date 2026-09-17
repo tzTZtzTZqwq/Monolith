@@ -16,7 +16,7 @@
 - 生命周期状态变化会刷新受影响 sector 内已打开的导航控制台；
 - `nsvsectormonitor` 可查看现有 sector 状态和集合计数。
 
-当前 P3 只实现 `Ready → PreparingSleep → Sleeping`。`Waking`、must-run blocker registry、统一 `RequestWake()` 和调用方唤醒迁移仍未实现。以下内容同时记录当前行为与后续目标：
+当前 P4 已实现 `Ready → PreparingSleep → Sleeping → Waking → Ready`、must-run task blocker registry、统一 `RequestWake()`，并将缓存 sector 获取、FTL arrival、玩家重新附着/重连和存活角色跨 map 转移接入唤醒门禁。P5 将继续补充更深入的状态保持、失败注入和性能验证。以下内容同时记录当前行为与后续目标：
 
 ```text
 周期 registry 扫描
@@ -147,9 +147,10 @@ PreparingSleep:
     deadline 到达 → TryCommitSleep()
 
 Sleeping:
-    当前 P3 保持 paused 和 Sleeping，清除 countdown
-    若发现被外部直接 unpause，则重新 pause，避免逻辑状态和 map 状态分裂
-    后续 P4 等待 RequestWake()；发现 blocker 时调用 RequestWake(Reconciliation) 兜底
+    保持 paused 和 Sleeping，清除 countdown
+    RequestWake() 立即执行 Waking → unpause → Ready
+    若扫描发现玩家、arrival 或 must-run blocker，则调用 RequestWake(Reconciliation) 兜底
+    若无 blocker 但被外部直接 unpause，则重新 pause，避免逻辑状态和 map 状态分裂
 ```
 
 事件可以即时更新缓存或触发后续唤醒，但周期扫描和冻结前完整重算才是最终真相，避免漏事件导致永久不休眠或错误冻结。
@@ -221,7 +222,7 @@ deadline 到达后执行 `TryCommitSleep()`。当前 P3 提交顺序为：
 6. 若复检失败，立即 `SetPaused(false)`、恢复 `Ready` 并清空时间窗口。
 7. 校验通过后提交 `Sleeping`，registry 在同一调用中同步更新、清除 countdown，并通知导航显示刷新。
 
-该提交片段不能跨到下一次生命周期扫描。验证失败时保留原 map 和实体；不得删除地图后从模板重建来掩盖失败。`TransitionEpoch` 和 must-run task blocker 属于后续 wake/任务协调阶段，P3 尚未引入。
+该提交片段不能跨到下一次生命周期扫描。验证失败时保留原 map 和实体；不得删除地图后从模板重建来掩盖失败。P4 已引入 `TransitionEpoch`，冻结和 wake 尝试都会递增 epoch，并用 transition owner 与 epoch 拒绝同步回调中的过期提交。must-run task blocker 按 sector 和 owner 去重，注册时立即唤醒，注销后下一轮扫描可重新进入休眠准备。
 
 ## 统一解冻接口
 
@@ -248,9 +249,9 @@ Sleeping 的恢复顺序：
 4. 调用 `SetPaused(false)` 并处理同步 unpause 回调。
 5. 提交 `Ready`，开放门禁并完成合并请求。
 
-解冻由接口立即触发，不等待下一次周期扫描。状态事件只通知已经完成的转换，不能成为第二套 pause/unpause 执行路径。
+解冻由接口立即触发，不等待下一次周期扫描。状态事件只通知转换进度，不能成为第二套 pause/unpause 执行路径。当前 P4 的 map pause API 为同步调用，因此 `Waking` 通常只在同一调用栈内短暂存在；重入请求会合并到当前 wake owner，不会重复 unpause。
 
-FTL 必须先等待目标 Ready，再取得 arrival reservation、写入 travel 数据并启动真实迁移。失败或取消时必须释放预留。
+FTL 会以 shuttle 为 requester 请求 `Arrival` wake；只有目标同步提交 `Ready` 后才取得 arrival reservation、写入 travel 数据并启动真实迁移。失败或取消时必须释放预留。玩家重新附着/重连和存活 `ActorComponent` 的跨 map parent change 会立即请求 wake，周期扫描仍负责漏事件 reconciliation。
 
 ## 保留、时间与销毁
 
@@ -308,8 +309,8 @@ FTL 必须先等待目标 Ready，再取得 arrival reservation、写入 travel 
 1. **已实现：** registry 周期扫描和按 map UID 的基础状态聚合。
 2. **已实现：** `ActiveLivingPlayers`、30 秒断线宽限、AI/玩家派系舰聚合和动态 deadline。
 3. **已实现：** 未暂停的 `PreparingSleep`、自动 deadline 提交、实际 map pause、冻结前后复检和失败回滚。
-4. 建立统一 `RequestWake()`，迁移所有直接唤醒和进入路径。
-5. 补充状态保持、失败注入和性能测试。
+4. **已实现：** 建立统一 `RequestWake()`、`Waking`/`TransitionEpoch`、must-run blocker，并迁移缓存获取、FTL、玩家重连与存活角色跨 map 转移路径。
+5. **下一步：** 补充状态保持、失败注入和性能测试。
 6. 废弃 `OwnedGrids` 的生命周期用途，并替换依赖它的玩法查询。
 
 ## 后置能力

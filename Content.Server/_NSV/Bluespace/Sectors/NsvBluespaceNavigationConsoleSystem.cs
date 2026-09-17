@@ -251,6 +251,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             NsvBluespaceSectorState.Ready => "nsv-bluespace-console-sector-status-ready",
             NsvBluespaceSectorState.PreparingSleep => "nsv-bluespace-console-sector-status-preparing-sleep",
             NsvBluespaceSectorState.Sleeping => "nsv-bluespace-console-sector-status-sleeping",
+            NsvBluespaceSectorState.Waking => "nsv-bluespace-console-sector-status-waking",
             NsvBluespaceSectorState.Draining => "nsv-bluespace-console-sector-status-draining",
             NsvBluespaceSectorState.Failed => "nsv-bluespace-console-sector-status-failed",
             _ => "nsv-bluespace-console-sector-status-awaiting-jump"

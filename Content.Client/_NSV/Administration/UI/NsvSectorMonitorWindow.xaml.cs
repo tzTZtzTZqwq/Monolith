@@ -26,6 +26,7 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
         AddHeader("nsv-sector-monitor-column-owned-entities", 120);
         AddHeader("nsv-sector-monitor-column-foreign-grids", 110);
         AddHeader("nsv-sector-monitor-column-pending-arrivals", 130);
+        AddHeader("nsv-sector-monitor-column-must-run-blockers", 130);
 
         foreach (var row in rows)
         {
@@ -40,6 +41,7 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
             AddCell(row.OwnedEntities.ToString(), 120);
             AddCell(row.ForeignGrids.ToString(), 110);
             AddCell(row.PendingArrivals.ToString(), 130);
+            AddCell(row.MustRunTaskBlockers.ToString(), 130);
         }
     }
 
@@ -70,6 +72,7 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
             "Ready" => "nsv-bluespace-console-sector-status-ready",
             "PreparingSleep" => "nsv-bluespace-console-sector-status-preparing-sleep",
             "Sleeping" => "nsv-bluespace-console-sector-status-sleeping",
+            "Waking" => "nsv-bluespace-console-sector-status-waking",
             "Draining" => "nsv-bluespace-console-sector-status-draining",
             "Failed" => "nsv-bluespace-console-sector-status-failed",
             _ => null,

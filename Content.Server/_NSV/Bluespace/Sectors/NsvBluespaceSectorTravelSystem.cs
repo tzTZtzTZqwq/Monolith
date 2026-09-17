@@ -122,7 +122,13 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
                 : new NsvBluespaceFactionSnapshot(false, default);
         }
 
-        if (!_sectors.TryGetOrCreateNode(starmapId, destinationNodeId, out var destinationMap, out var sectorFailure) ||
+        if (!_sectors.TryGetOrCreateNode(
+                starmapId,
+                destinationNodeId,
+                NsvBluespaceSectorWakeReason.Arrival,
+                shuttleUid,
+                out var destinationMap,
+                out var sectorFailure) ||
             !TryComp<NsvBluespaceSectorInstanceComponent>(destinationMap, out var destinationSector) ||
             destinationSector.State != NsvBluespaceSectorState.Ready)
         {
@@ -174,7 +180,13 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         if (!_shuttle.CanFTL(shuttleUid, out reason))
             return false;
 
-        if (!_sectors.TryGetOrCreate(templateId, seed, out var mapUid, out var sectorFailure) ||
+        if (!_sectors.TryGetOrCreate(
+                templateId,
+                seed,
+                NsvBluespaceSectorWakeReason.Arrival,
+                shuttleUid,
+                out var mapUid,
+                out var sectorFailure) ||
             !TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var sector) ||
             sector.State != NsvBluespaceSectorState.Ready)
         {

@@ -12,6 +12,7 @@ public enum NsvBluespaceSectorState
     Ready,
     PreparingSleep,
     Sleeping,
+    Waking,
     Draining,
     Failed
 }
@@ -43,6 +44,9 @@ public sealed partial class NsvBluespaceSectorInstanceComponent : Component
 
     [ViewVariables]
     public NsvBluespaceSectorState State = NsvBluespaceSectorState.Applying;
+
+    [ViewVariables]
+    public uint TransitionEpoch;
 
     [ViewVariables]
     public readonly HashSet<EntityUid> OwnedGrids = new();

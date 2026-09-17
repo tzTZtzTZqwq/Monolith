@@ -7,3 +7,4 @@ nsv-sector-monitor-column-owned-grids = Owned grids
 nsv-sector-monitor-column-owned-entities = Owned entities
 nsv-sector-monitor-column-foreign-grids = Foreign grids
 nsv-sector-monitor-column-pending-arrivals = Pending arrivals
+nsv-sector-monitor-column-must-run-blockers = Must-run blockers

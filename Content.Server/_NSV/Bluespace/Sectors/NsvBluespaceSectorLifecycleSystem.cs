@@ -16,12 +16,23 @@ using Robust.Shared.Timing;
 
 namespace Content.Server._NSV.Bluespace.Sectors;
 
+public enum NsvBluespaceSectorWakeReason
+{
+    SectorAccess,
+    Arrival,
+    PlayerReconnect,
+    EntityTransfer,
+    MustRunTask,
+    Reconciliation
+}
+
 public readonly record struct NsvBluespaceSectorRegistryEntry(
     EntityUid MapUid,
     MapId MapId,
     NsvBluespaceSectorState State,
     int ForeignGridCount,
     int PendingArrivalCount,
+    int MustRunTaskBlockerCount,
     int ActiveLivingPlayers,
     int ActiveAiShips,
     bool HasPlayerFactionShip,
@@ -46,18 +57,23 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
     [Dependency] private IGameTiming _timing = default!;
 
     private readonly Dictionary<NetUserId, DisconnectedLivingCharacter> _disconnectedCharacters = new();
+    private readonly Dictionary<EntityUid, HashSet<EntityUid>> _mustRunTaskBlockers = new();
     private Dictionary<EntityUid, NsvBluespaceSectorRegistryEntry> _registry = new();
     private EntityUid? _sleepTransitionOwner;
+    private EntityUid? _wakeTransitionOwner;
     private float _scanAccumulator;
 
     internal TimeSpan DisconnectedPlayerGrace { get; set; } = TimeSpan.FromSeconds(30);
     internal Action<EntityUid>? MapPausedTestHook { get; set; }
+    internal Action<EntityUid>? MapUnpausedTestHook { get; set; }
 
     public event Action<EntityUid>? SectorDisplayChanged;
 
     public override void Initialize()
     {
         base.Initialize();
+        SubscribeLocalEvent<PlayerAttachedEvent>(OnPlayerAttached);
+        SubscribeLocalEvent<ActorComponent, EntParentChangedMessage>(OnActorParentChanged);
         _players.PlayerStatusChanged += OnPlayerStatusChanged;
         RefreshRegistry();
     }
@@ -66,9 +82,12 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
     {
         _players.PlayerStatusChanged -= OnPlayerStatusChanged;
         _disconnectedCharacters.Clear();
+        _mustRunTaskBlockers.Clear();
         _registry.Clear();
         _sleepTransitionOwner = null;
+        _wakeTransitionOwner = null;
         MapPausedTestHook = null;
+        MapUnpausedTestHook = null;
         SectorDisplayChanged = null;
         base.Shutdown();
     }
@@ -85,6 +104,8 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
 
     public void RefreshRegistry()
     {
+        PruneMustRunTaskBlockers();
+
         var registry = new Dictionary<EntityUid, NsvBluespaceSectorRegistryEntry>();
         var aggregations = new Dictionary<EntityUid, SectorAggregation>();
         var sectorQuery = EntityManager.AllEntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
@@ -96,6 +117,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
                 sector.State,
                 sector.ForeignGrids.Count,
                 sector.PendingArrivals.Count,
+                GetMustRunTaskBlockerCount(mapUid),
                 0,
                 0,
                 false,
@@ -110,6 +132,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         AggregatePlayerFactionShips(aggregations);
 
         var sleepCandidates = new List<EntityUid>();
+        var wakeCandidates = new List<EntityUid>();
         var sleepingReconciliations = new List<EntityUid>();
         var displayChanges = new HashSet<EntityUid>();
         var now = _timing.CurTime;
@@ -122,10 +145,14 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
             var state = entry.State;
             var eligibleSince = default(TimeSpan?);
             var deadline = default(TimeSpan?);
+            var hasSleepBlocker = HasSleepBlocker(
+                activeLivingPlayers,
+                entry.PendingArrivalCount,
+                entry.MustRunTaskBlockerCount);
 
             if (state is NsvBluespaceSectorState.Ready or NsvBluespaceSectorState.PreparingSleep)
             {
-                if (HasSleepBlocker(activeLivingPlayers, entry.PendingArrivalCount))
+                if (hasSleepBlocker)
                 {
                     if (state == NsvBluespaceSectorState.PreparingSleep &&
                         TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var sector))
@@ -163,9 +190,12 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
                         sleepCandidates.Add(mapUid);
                 }
             }
-            else if (state == NsvBluespaceSectorState.Sleeping && !_map.IsPaused(entry.MapId))
+            else if (state == NsvBluespaceSectorState.Sleeping)
             {
-                sleepingReconciliations.Add(mapUid);
+                if (hasSleepBlocker)
+                    wakeCandidates.Add(mapUid);
+                else if (!_map.IsPaused(entry.MapId))
+                    sleepingReconciliations.Add(mapUid);
             }
 
             registry[mapUid] = entry with
@@ -183,6 +213,9 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
 
         foreach (var mapUid in displayChanges)
             SectorDisplayChanged?.Invoke(mapUid);
+
+        foreach (var mapUid in wakeCandidates)
+            RequestWake(mapUid, NsvBluespaceSectorWakeReason.Reconciliation, null, out _);
 
         foreach (var mapUid in sleepingReconciliations)
         {
@@ -203,6 +236,106 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         return _registry.TryGetValue(mapUid, out entry);
     }
 
+    public bool RegisterMustRunTaskBlocker(EntityUid mapUid, EntityUid owner, out string? failure)
+    {
+        failure = null;
+        if (!owner.IsValid() || TerminatingOrDeleted(owner))
+        {
+            failure = "The must-run task owner is invalid.";
+            return false;
+        }
+
+        if (TerminatingOrDeleted(mapUid) || !HasComp<NsvBluespaceSectorInstanceComponent>(mapUid))
+        {
+            failure = "The bluespace sector is unavailable.";
+            return false;
+        }
+
+        if (!_mustRunTaskBlockers.TryGetValue(mapUid, out var blockers))
+        {
+            blockers = new HashSet<EntityUid>();
+            _mustRunTaskBlockers.Add(mapUid, blockers);
+        }
+
+        if (!blockers.Add(owner))
+            return true;
+
+        if (RequestWake(mapUid, NsvBluespaceSectorWakeReason.MustRunTask, owner, out failure))
+        {
+            UpdateMustRunTaskBlockerCount(mapUid);
+            return true;
+        }
+
+        blockers.Remove(owner);
+        if (blockers.Count == 0)
+            _mustRunTaskBlockers.Remove(mapUid);
+        return false;
+    }
+
+    public bool UnregisterMustRunTaskBlocker(EntityUid mapUid, EntityUid owner)
+    {
+        if (!_mustRunTaskBlockers.TryGetValue(mapUid, out var blockers) || !blockers.Remove(owner))
+            return false;
+
+        if (blockers.Count == 0)
+            _mustRunTaskBlockers.Remove(mapUid);
+        UpdateMustRunTaskBlockerCount(mapUid);
+        return true;
+    }
+
+    public bool HasMustRunTaskBlockers(EntityUid mapUid)
+    {
+        return GetMustRunTaskBlockerCount(mapUid) != 0;
+    }
+
+    public bool RequestWake(
+        EntityUid mapUid,
+        NsvBluespaceSectorWakeReason reason,
+        EntityUid? requester,
+        out string? failure)
+    {
+        failure = null;
+        if (TerminatingOrDeleted(mapUid) ||
+            !TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var sector))
+        {
+            failure = "The bluespace sector is unavailable.";
+            return false;
+        }
+
+        if (sector.State == NsvBluespaceSectorState.Waking || _wakeTransitionOwner == mapUid)
+            return true;
+
+        switch (sector.State)
+        {
+            case NsvBluespaceSectorState.Ready:
+                if (!_map.IsPaused(sector.MapId))
+                    return true;
+                return TryWakePausedSector(mapUid, sector, reason, requester, out failure);
+            case NsvBluespaceSectorState.PreparingSleep:
+                if (_sleepTransitionOwner == mapUid)
+                    _sleepTransitionOwner = null;
+                if (_map.IsPaused(sector.MapId))
+                    return TryWakePausedSector(mapUid, sector, reason, requester, out failure);
+                sector.TransitionEpoch++;
+                SetLifecycleState(mapUid, sector, NsvBluespaceSectorState.Ready);
+                return true;
+            case NsvBluespaceSectorState.Sleeping:
+                return TryWakePausedSector(mapUid, sector, reason, requester, out failure);
+            case NsvBluespaceSectorState.Applying:
+                failure = "The bluespace sector is still being prepared.";
+                return false;
+            case NsvBluespaceSectorState.Draining:
+                failure = "The bluespace sector is being destroyed.";
+                return false;
+            case NsvBluespaceSectorState.Failed:
+                failure = "The bluespace sector is unavailable.";
+                return false;
+            default:
+                failure = $"The bluespace sector cannot wake from {sector.State}.";
+                return false;
+        }
+    }
+
     internal bool TryCommitSleep(EntityUid mapUid)
     {
         if (_sleepTransitionOwner != null ||
@@ -214,6 +347,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         }
 
         _sleepTransitionOwner = mapUid;
+        var transitionEpoch = ++sector.TransitionEpoch;
         try
         {
             if (HasAuthoritativeSleepBlocker(mapUid, sector))
@@ -236,6 +370,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
             if (_sleepTransitionOwner != mapUid ||
                 TerminatingOrDeleted(mapUid) ||
                 !TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out sector) ||
+                sector.TransitionEpoch != transitionEpoch ||
                 sector.State != NsvBluespaceSectorState.PreparingSleep ||
                 !_map.IsPaused(sector.MapId) ||
                 HasAuthoritativeSleepBlocker(mapUid, sector))
@@ -254,11 +389,67 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         }
     }
 
+    private bool TryWakePausedSector(
+        EntityUid mapUid,
+        NsvBluespaceSectorInstanceComponent sector,
+        NsvBluespaceSectorWakeReason reason,
+        EntityUid? requester,
+        out string? failure)
+    {
+        failure = null;
+        if (_wakeTransitionOwner != null)
+        {
+            failure = _wakeTransitionOwner == mapUid
+                ? null
+                : "Another bluespace sector transition is in progress.";
+            return _wakeTransitionOwner == mapUid;
+        }
+
+        if (_sleepTransitionOwner == mapUid)
+            _sleepTransitionOwner = null;
+
+        _wakeTransitionOwner = mapUid;
+        var transitionEpoch = ++sector.TransitionEpoch;
+        SetLifecycleState(mapUid, sector, NsvBluespaceSectorState.Waking);
+        try
+        {
+            if (_map.IsPaused(sector.MapId))
+                _map.SetPaused(sector.MapId, false);
+
+            var testHook = MapUnpausedTestHook;
+            MapUnpausedTestHook = null;
+            testHook?.Invoke(mapUid);
+
+            if (_wakeTransitionOwner != mapUid ||
+                TerminatingOrDeleted(mapUid) ||
+                !TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var currentSector) ||
+                currentSector.TransitionEpoch != transitionEpoch ||
+                currentSector.State != NsvBluespaceSectorState.Waking ||
+                _map.IsPaused(currentSector.MapId))
+            {
+                RollbackWake(mapUid);
+                failure = "The bluespace sector wake transition was interrupted.";
+                return false;
+            }
+
+            SetLifecycleState(mapUid, currentSector, NsvBluespaceSectorState.Ready);
+            Logger.DebugS(
+                "nsv.bluespace",
+                $"Woke sector {ToPrettyString(mapUid)} for {reason} requested by {requester?.ToString() ?? "system"}.");
+            return true;
+        }
+        finally
+        {
+            if (_wakeTransitionOwner == mapUid)
+                _wakeTransitionOwner = null;
+        }
+    }
+
     private bool HasAuthoritativeSleepBlocker(
         EntityUid mapUid,
         NsvBluespaceSectorInstanceComponent sector)
     {
-        if (sector.PendingArrivals.Count != 0)
+        if (sector.PendingArrivals.Count != 0 || HasMustRunTaskBlockers(mapUid))
             return true;
 
         var aggregations = new Dictionary<EntityUid, SectorAggregation>
@@ -285,6 +476,20 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
             SetLifecycleState(mapUid, sector, NsvBluespaceSectorState.Ready);
     }
 
+    private void RollbackWake(EntityUid mapUid)
+    {
+        if (TerminatingOrDeleted(mapUid) ||
+            !TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var sector) ||
+            sector.State != NsvBluespaceSectorState.Waking)
+        {
+            return;
+        }
+
+        if (!_map.IsPaused(sector.MapId))
+            _map.SetPaused(sector.MapId, true);
+        SetLifecycleState(mapUid, sector, NsvBluespaceSectorState.Sleeping);
+    }
+
     private void SetLifecycleState(
         EntityUid mapUid,
         NsvBluespaceSectorInstanceComponent sector,
@@ -298,6 +503,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
             {
                 State = state,
                 PendingArrivalCount = sector.PendingArrivals.Count,
+                MustRunTaskBlockerCount = GetMustRunTaskBlockerCount(mapUid),
                 SleepEligibleSince = null,
                 SleepDeadline = null,
             };
@@ -307,9 +513,46 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
             SectorDisplayChanged?.Invoke(mapUid);
     }
 
-    private static bool HasSleepBlocker(int activeLivingPlayers, int pendingArrivalCount)
+    private void UpdateMustRunTaskBlockerCount(EntityUid mapUid)
     {
-        return activeLivingPlayers != 0 || pendingArrivalCount != 0;
+        if (_registry.TryGetValue(mapUid, out var entry))
+        {
+            _registry[mapUid] = entry with
+            {
+                MustRunTaskBlockerCount = GetMustRunTaskBlockerCount(mapUid),
+            };
+        }
+
+        SectorDisplayChanged?.Invoke(mapUid);
+    }
+
+    private int GetMustRunTaskBlockerCount(EntityUid mapUid)
+    {
+        return _mustRunTaskBlockers.TryGetValue(mapUid, out var blockers) ? blockers.Count : 0;
+    }
+
+    private void PruneMustRunTaskBlockers()
+    {
+        foreach (var (mapUid, blockers) in _mustRunTaskBlockers.ToArray())
+        {
+            if (TerminatingOrDeleted(mapUid) || !HasComp<NsvBluespaceSectorInstanceComponent>(mapUid))
+            {
+                _mustRunTaskBlockers.Remove(mapUid);
+                continue;
+            }
+
+            blockers.RemoveWhere(uid => TerminatingOrDeleted(uid));
+            if (blockers.Count == 0)
+                _mustRunTaskBlockers.Remove(mapUid);
+        }
+    }
+
+    private static bool HasSleepBlocker(
+        int activeLivingPlayers,
+        int pendingArrivalCount,
+        int mustRunTaskBlockerCount)
+    {
+        return activeLivingPlayers != 0 || pendingArrivalCount != 0 || mustRunTaskBlockerCount != 0;
     }
 
     private void OnPlayerStatusChanged(object? sender, SessionStatusEventArgs args)
@@ -317,22 +560,51 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         if (args.NewStatus == SessionStatus.InGame)
         {
             _disconnectedCharacters.Remove(args.Session.UserId);
+            if (args.Session.AttachedEntity is { } entity && IsBlockingLivingCharacter(entity))
+                TryWakeForEntity(entity, NsvBluespaceSectorWakeReason.PlayerReconnect);
             return;
         }
 
         if (args.NewStatus != SessionStatus.Disconnected)
             return;
 
-        if (args.Session.AttachedEntity is { } entity && IsBlockingLivingCharacter(entity))
+        if (args.Session.AttachedEntity is { } disconnectedEntity && IsBlockingLivingCharacter(disconnectedEntity))
         {
             _disconnectedCharacters[args.Session.UserId] = new DisconnectedLivingCharacter(
-                entity,
+                disconnectedEntity,
                 _timing.CurTime);
         }
         else
         {
             _disconnectedCharacters.Remove(args.Session.UserId);
         }
+    }
+
+    private void OnPlayerAttached(PlayerAttachedEvent args)
+    {
+        if (IsBlockingLivingCharacter(args.Entity))
+            TryWakeForEntity(args.Entity, NsvBluespaceSectorWakeReason.PlayerReconnect);
+    }
+
+    private void OnActorParentChanged(Entity<ActorComponent> ent, ref EntParentChangedMessage args)
+    {
+        if (IsBlockingLivingCharacter(ent.Owner))
+            TryWakeForEntity(ent.Owner, NsvBluespaceSectorWakeReason.EntityTransfer);
+    }
+
+    private void TryWakeForEntity(EntityUid entity, NsvBluespaceSectorWakeReason reason)
+    {
+        if (!TryComp<TransformComponent>(entity, out var transform) ||
+            transform.MapUid is not { } mapUid ||
+            !TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var sector) ||
+            sector.State is not (NsvBluespaceSectorState.PreparingSleep or
+                NsvBluespaceSectorState.Sleeping or
+                NsvBluespaceSectorState.Waking))
+        {
+            return;
+        }
+
+        RequestWake(mapUid, reason, entity, out _);
     }
 
     private void AggregateOnlinePlayers(Dictionary<EntityUid, SectorAggregation> aggregations)

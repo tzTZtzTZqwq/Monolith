@@ -25,7 +25,8 @@ public sealed class NsvSectorMonitorRow
         int ownedGrids,
         int ownedEntities,
         int foreignGrids,
-        int pendingArrivals)
+        int pendingArrivals,
+        int mustRunTaskBlockers)
     {
         NameLocId = nameLocId;
         NameFallback = nameFallback;
@@ -35,6 +36,7 @@ public sealed class NsvSectorMonitorRow
         OwnedEntities = ownedEntities;
         ForeignGrids = foreignGrids;
         PendingArrivals = pendingArrivals;
+        MustRunTaskBlockers = mustRunTaskBlockers;
     }
 
     public string NameLocId { get; }
@@ -45,6 +47,7 @@ public sealed class NsvSectorMonitorRow
     public int OwnedEntities { get; }
     public int ForeignGrids { get; }
     public int PendingArrivals { get; }
+    public int MustRunTaskBlockers { get; }
 }
 
 public static class NsvSectorMonitorEuiMsg

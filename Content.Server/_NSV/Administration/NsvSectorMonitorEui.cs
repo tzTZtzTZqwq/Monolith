@@ -33,6 +33,7 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
 
     public override EuiStateBase GetNewState()
     {
+        var lifecycle = _entityManager.System<NsvBluespaceSectorLifecycleSystem>();
         var rows = new List<(int MapId, NsvSectorMonitorRow Row)>();
         var query = _entityManager.AllEntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
         while (query.MoveNext(out var uid, out var sector))
@@ -42,6 +43,9 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
             if (_prototype.TryIndex<NsvBluespaceSectorTemplatePrototype>(sector.TemplateId, out var template))
                 nameLocId = template.Name.ToString();
 
+            var mustRunTaskBlockers = lifecycle.TryGetRegistryEntry(uid, out var entry)
+                ? entry.MustRunTaskBlockerCount
+                : 0;
             rows.Add(((int) sector.MapId, new NsvSectorMonitorRow(
                 nameLocId,
                 nameFallback,
@@ -50,7 +54,8 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
                 sector.OwnedGrids.Count,
                 sector.OwnedEntities.Count,
                 sector.ForeignGrids.Count,
-                sector.PendingArrivals.Count)));
+                sector.PendingArrivals.Count,
+                mustRunTaskBlockers)));
         }
 
         return new NsvSectorMonitorEuiState(rows
