@@ -97,7 +97,13 @@ public sealed class NsvBluespaceEncounterSystemTest
                 Assert.That(reason, Is.EqualTo("The encounter objective is not complete."));
             });
 
-            await server.WaitPost(() => entityManager.DeleteEntity(targetCore));
+            await server.WaitPost(() =>
+            {
+                var sector = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(sectorMap);
+                entityManager.System<NsvBluespaceSectorLifecycleSystem>().RefreshRegistry();
+                Assert.That(sector.State, Is.EqualTo(NsvBluespaceSectorState.PreparingSleep));
+                entityManager.DeleteEntity(targetCore);
+            });
             await server.WaitRunTicks(1);
             await server.WaitAssertion(() =>
             {
@@ -141,9 +147,11 @@ public sealed class NsvBluespaceEncounterSystemTest
             await server.WaitPost(() =>
             {
                 Assert.That(entityManager.GetComponent<TransformComponent>(secondShuttleUid).MapUid, Is.EqualTo(secondShuttle.MapUid));
-                Assert.That(
-                    sectors.TryDispose((sectorMap, entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(sectorMap))),
-                    Is.True);
+                var sector = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(sectorMap);
+                sector.PendingArrivals.Add(EntityUid.Invalid);
+                entityManager.System<NsvBluespaceSectorLifecycleSystem>().RefreshRegistry();
+                sector.PendingArrivals.Clear();
+                Assert.That(sectors.TryDispose((sectorMap, sector)), Is.True);
             });
         }
         finally

@@ -27,14 +27,15 @@ public sealed class NsvBluespaceStarmapSystemTest
         {
             Assert.That(sectors.TryGetOrCreateNode(FixtureStarmapId, "SharedAlpha", out alphaMap, out var alphaFailure), Is.True, alphaFailure);
             Assert.That(sectors.TryGetOrCreateNode(FixtureStarmapId, "SharedBeta", out betaMap, out var betaFailure), Is.True, betaFailure);
+            var alpha = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(alphaMap);
             Assert.That(sectors.TryGetOrCreateNode(FixtureStarmapId, "SharedAlpha", out var repeatedAlphaMap, out var repeatedFailure), Is.True, repeatedFailure);
 
-            var alpha = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(alphaMap);
             var beta = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(betaMap);
             Assert.Multiple(() =>
             {
                 Assert.That(alphaMap, Is.Not.EqualTo(betaMap));
                 Assert.That(repeatedAlphaMap, Is.EqualTo(alphaMap));
+                Assert.That(alpha.State, Is.EqualTo(NsvBluespaceSectorState.Ready));
                 Assert.That(alpha.TemplateId, Is.EqualTo(beta.TemplateId));
                 Assert.That(alpha.StarmapId.ToString(), Is.EqualTo(FixtureStarmapId));
                 Assert.That(beta.StarmapId.ToString(), Is.EqualTo(FixtureStarmapId));
@@ -106,6 +107,8 @@ public sealed class NsvBluespaceStarmapSystemTest
                 Assert.That(returnReason, Is.EqualTo("The encounter objective is not complete."));
 
                 var pirate = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(pirateMap);
+                entityManager.System<NsvBluespaceSectorLifecycleSystem>().RefreshRegistry();
+                Assert.That(pirate.State, Is.EqualTo(NsvBluespaceSectorState.PreparingSleep));
                 var encounter = entityManager.GetComponent<NsvBluespaceEncounterComponent>(pirate.EncounterController);
                 entityManager.DeleteEntity(encounter.ObjectiveTarget);
             });
@@ -149,12 +152,15 @@ public sealed class NsvBluespaceStarmapSystemTest
             // mutated by this test.
             await server.WaitPost(() =>
             {
-                Assert.That(
-                    sectors.TryDispose((pirateMap, entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(pirateMap))),
-                    Is.True);
-                Assert.That(
-                    sectors.TryDispose((asteroidMapUid, entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(asteroidMapUid))),
-                    Is.True);
+                var pirate = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(pirateMap);
+                var asteroid = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(asteroidMapUid);
+                pirate.PendingArrivals.Add(EntityUid.Invalid);
+                asteroid.PendingArrivals.Add(EntityUid.Invalid);
+                entityManager.System<NsvBluespaceSectorLifecycleSystem>().RefreshRegistry();
+                pirate.PendingArrivals.Clear();
+                asteroid.PendingArrivals.Clear();
+                Assert.That(sectors.TryDispose((pirateMap, pirate)), Is.True);
+                Assert.That(sectors.TryDispose((asteroidMapUid, asteroid)), Is.True);
             });
         }
         finally

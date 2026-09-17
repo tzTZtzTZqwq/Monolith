@@ -16,6 +16,7 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
     [Dependency] private MapSystem _map = default!;
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
+    [Dependency] private NsvBluespaceSectorLifecycleSystem _lifecycle = default!;
     [Dependency] private IMapManager _mapManager = default!;
     [Dependency] private MapLoaderSystem _mapLoader = default!;
     [Dependency] private IPrototypeManager _prototype = default!;
@@ -45,12 +46,29 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
         int seed,
         out EntityUid mapUid)
     {
-        return TryGetOrCreate(templateId, seed, out mapUid, out _);
+        return TryGetOrCreate(templateId, seed, NsvBluespaceSectorWakeReason.SectorAccess, null, out mapUid, out _);
     }
 
     public bool TryGetOrCreate(
         ProtoId<NsvBluespaceSectorTemplatePrototype> templateId,
         int seed,
+        out EntityUid mapUid,
+        out string? failure)
+    {
+        return TryGetOrCreate(
+            templateId,
+            seed,
+            NsvBluespaceSectorWakeReason.SectorAccess,
+            null,
+            out mapUid,
+            out failure);
+    }
+
+    public bool TryGetOrCreate(
+        ProtoId<NsvBluespaceSectorTemplatePrototype> templateId,
+        int seed,
+        NsvBluespaceSectorWakeReason wakeReason,
+        EntityUid? requester,
         out EntityUid mapUid,
         out string? failure)
     {
@@ -62,6 +80,8 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
             string.Empty,
             string.Empty,
             string.Empty,
+            wakeReason,
+            requester,
             out mapUid,
             out failure);
     }
@@ -69,6 +89,23 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
     public bool TryGetOrCreateNode(
         ProtoId<NsvBluespaceStarmapPrototype> starmapId,
         string nodeId,
+        out EntityUid mapUid,
+        out string? failure)
+    {
+        return TryGetOrCreateNode(
+            starmapId,
+            nodeId,
+            NsvBluespaceSectorWakeReason.SectorAccess,
+            null,
+            out mapUid,
+            out failure);
+    }
+
+    public bool TryGetOrCreateNode(
+        ProtoId<NsvBluespaceStarmapPrototype> starmapId,
+        string nodeId,
+        NsvBluespaceSectorWakeReason wakeReason,
+        EntityUid? requester,
         out EntityUid mapUid,
         out string? failure)
     {
@@ -98,6 +135,8 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
             starmapId,
             node.ID,
             encounterDefinitionId,
+            wakeReason,
+            requester,
             out mapUid,
             out failure);
     }
@@ -110,6 +149,8 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
         ProtoId<NsvBluespaceStarmapPrototype> starmapId,
         string nodeId,
         string encounterDefinitionId,
+        NsvBluespaceSectorWakeReason wakeReason,
+        EntityUid? requester,
         out EntityUid mapUid,
         out string? failure)
         where TKey : notnull
@@ -117,15 +158,19 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
         failure = null;
         if (activeSectors.TryGetValue(key, out mapUid) && !TerminatingOrDeleted(mapUid))
         {
-            if (TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var active) &&
-                active.State == NsvBluespaceSectorState.Ready)
+            if (!TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var active))
             {
-                return true;
+                failure = $"Sector '{templateId}' has no instance state.";
+                return false;
             }
 
-            failure = TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out active)
-                ? $"Sector '{templateId}' is {active.State}."
-                : $"Sector '{templateId}' has no instance state.";
+            if (!_lifecycle.RequestWake(mapUid, wakeReason, requester, out failure))
+                return false;
+
+            if (active.State == NsvBluespaceSectorState.Ready)
+                return true;
+
+            failure = $"Sector '{templateId}' is {active.State}.";
             return false;
         }
 
@@ -203,9 +248,10 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
     public bool TryDispose(Entity<NsvBluespaceSectorInstanceComponent?> sector)
     {
         if (!Resolve(sector, ref sector.Comp, false) ||
-            sector.Comp.State != NsvBluespaceSectorState.Ready ||
+            sector.Comp.State is not (NsvBluespaceSectorState.Ready or NsvBluespaceSectorState.Sleeping) ||
             sector.Comp.ForeignGrids.Count != 0 ||
-            sector.Comp.PendingArrivals.Count != 0)
+            sector.Comp.PendingArrivals.Count != 0 ||
+            _lifecycle.HasMustRunTaskBlockers(sector.Owner))
         {
             return false;
         }

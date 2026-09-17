@@ -14,6 +14,7 @@ namespace Content.Server._NSV.Bluespace.Sectors;
 public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
 {
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
+    [Dependency] private NsvBluespaceSectorLifecycleSystem _lifecycle = default!;
     [Dependency] private NsvBluespaceSectorTravelSystem _travel = default!;
     [Dependency] private SharedPopupSystem _popup = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
@@ -30,6 +31,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _travel.SectorDisplayChanged += RefreshSector;
         _travel.ShuttleDisplayChanged += RefreshShuttle;
         _encounters.SectorDisplayChanged += RefreshSector;
+        _lifecycle.SectorDisplayChanged += RefreshSector;
     }
 
     public override void Shutdown()
@@ -37,6 +39,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _travel.SectorDisplayChanged -= RefreshSector;
         _travel.ShuttleDisplayChanged -= RefreshShuttle;
         _encounters.SectorDisplayChanged -= RefreshSector;
+        _lifecycle.SectorDisplayChanged -= RefreshSector;
         base.Shutdown();
     }
 
@@ -80,7 +83,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
 
     private void RefreshSector(EntityUid sectorMap)
     {
-        var query = EntityQueryEnumerator<NsvBluespaceJumpPointComponent, TransformComponent>();
+        var query = EntityManager.AllEntityQueryEnumerator<NsvBluespaceJumpPointComponent, TransformComponent>();
         while (query.MoveNext(out var uid, out var jumpPoint, out var transform))
         {
             if (transform.MapUid == sectorMap)
@@ -90,7 +93,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
 
     private void RefreshShuttle(EntityUid shuttleUid)
     {
-        var query = EntityQueryEnumerator<NsvBluespaceJumpPointComponent, TransformComponent>();
+        var query = EntityManager.AllEntityQueryEnumerator<NsvBluespaceJumpPointComponent, TransformComponent>();
         while (query.MoveNext(out var uid, out var jumpPoint, out var transform))
         {
             if (transform.GridUid == shuttleUid)
@@ -244,12 +247,12 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
     {
         return state switch
         {
-            NsvBluespaceSectorState.Requested => "nsv-bluespace-console-sector-status-requested",
-            NsvBluespaceSectorState.Planning => "nsv-bluespace-console-sector-status-planning",
             NsvBluespaceSectorState.Applying => "nsv-bluespace-console-sector-status-applying",
             NsvBluespaceSectorState.Ready => "nsv-bluespace-console-sector-status-ready",
+            NsvBluespaceSectorState.PreparingSleep => "nsv-bluespace-console-sector-status-preparing-sleep",
+            NsvBluespaceSectorState.Sleeping => "nsv-bluespace-console-sector-status-sleeping",
+            NsvBluespaceSectorState.Waking => "nsv-bluespace-console-sector-status-waking",
             NsvBluespaceSectorState.Draining => "nsv-bluespace-console-sector-status-draining",
-            NsvBluespaceSectorState.Disposed => "nsv-bluespace-console-sector-status-disposed",
             NsvBluespaceSectorState.Failed => "nsv-bluespace-console-sector-status-failed",
             _ => "nsv-bluespace-console-sector-status-awaiting-jump"
         };

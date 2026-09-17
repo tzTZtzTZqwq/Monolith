@@ -10,26 +10,23 @@ using Content.Shared.Shuttles.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
-using Robust.Shared.Timing;
 
 namespace Content.Server._NSV.Bluespace.Sectors;
 
 public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
 {
     private const string PlayerFaction = "NSVPlayer";
-    private static readonly TimeSpan CleanupDelay = TimeSpan.FromMinutes(2);
 
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
     [Dependency] private NsvBluespacePatrolContractSystem _patrolContracts = default!;
-    [Dependency] private IGameTiming _timing = default!;
     [Dependency] private NsvBluespaceSectorSystem _sectors = default!;
     [Dependency] private ShuttleSystem _shuttle = default!;
 
-    private readonly Dictionary<EntityUid, TimeSpan> _emptySince = new();
-
     public event Action<EntityUid>? SectorDisplayChanged;
     public event Action<EntityUid>? ShuttleDisplayChanged;
+
+    private readonly Dictionary<EntityUid, EntityUid> _arrivalReservations = new();
 
     public override void Initialize()
     {
@@ -125,7 +122,13 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
                 : new NsvBluespaceFactionSnapshot(false, default);
         }
 
-        if (!_sectors.TryGetOrCreateNode(starmapId, destinationNodeId, out var destinationMap, out var sectorFailure) ||
+        if (!_sectors.TryGetOrCreateNode(
+                starmapId,
+                destinationNodeId,
+                NsvBluespaceSectorWakeReason.Arrival,
+                shuttleUid,
+                out var destinationMap,
+                out var sectorFailure) ||
             !TryComp<NsvBluespaceSectorInstanceComponent>(destinationMap, out var destinationSector) ||
             destinationSector.State != NsvBluespaceSectorState.Ready)
         {
@@ -177,7 +180,13 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         if (!_shuttle.CanFTL(shuttleUid, out reason))
             return false;
 
-        if (!_sectors.TryGetOrCreate(templateId, seed, out var mapUid, out var sectorFailure) ||
+        if (!_sectors.TryGetOrCreate(
+                templateId,
+                seed,
+                NsvBluespaceSectorWakeReason.Arrival,
+                shuttleUid,
+                out var mapUid,
+                out var sectorFailure) ||
             !TryComp<NsvBluespaceSectorInstanceComponent>(mapUid, out var sector) ||
             sector.State != NsvBluespaceSectorState.Ready)
         {
@@ -208,6 +217,12 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         NsvBluespaceFactionSnapshot factionSnapshot,
         out string? reason)
     {
+        if (destinationSector.State != NsvBluespaceSectorState.Ready)
+        {
+            reason = "The bluespace sector is not ready to receive arrivals.";
+            return false;
+        }
+
         if (destinationSector.PendingArrivals.Contains(shuttleUid))
         {
             reason = "This shuttle is already entering the bluespace sector.";
@@ -220,17 +235,20 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
             return false;
         }
 
+        if (_arrivalReservations.ContainsKey(shuttleUid))
+        {
+            reason = "This shuttle already has a bluespace arrival reservation.";
+            return false;
+        }
+
+        _arrivalReservations.Add(shuttleUid, destinationMap);
         destinationSector.ForeignGridFactionSnapshots[shuttleUid] = factionSnapshot;
         destinationSector.ReturnDestinations[shuttleUid] = returnCoordinates;
         destinationSector.PendingArrivals.Add(shuttleUid);
-        _emptySince.Remove(destinationMap);
         _shuttle.FTLToCoordinates(shuttleUid, shuttle, new EntityCoordinates(destinationMap, Vector2.Zero), Angle.Zero);
         if (!HasComp<FTLComponent>(shuttleUid))
         {
-            destinationSector.PendingArrivals.Remove(shuttleUid);
-            destinationSector.ForeignGridFactionSnapshots.Remove(shuttleUid);
-            destinationSector.ReturnDestinations.Remove(shuttleUid);
-            NotifySectorChanged(destinationMap);
+            CancelArrival(shuttleUid);
             reason = "The bluespace drive did not engage.";
             return false;
         }
@@ -268,10 +286,20 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
 
     public override void Update(float frameTime)
     {
-        var query = EntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
+        var staleReservations = _arrivalReservations.Keys
+            .Where(shuttleUid => !HasComp<FTLComponent>(shuttleUid))
+            .ToArray();
+        foreach (var shuttleUid in staleReservations)
+        {
+            CancelArrival(shuttleUid);
+        }
+
+        var query = EntityManager.AllEntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
         while (query.MoveNext(out var uid, out var sector))
         {
-            var staleArrivals = sector.PendingArrivals.Where(shuttleUid => !HasComp<FTLComponent>(shuttleUid)).ToArray();
+            var staleArrivals = sector.PendingArrivals
+                .Where(shuttleUid => !_arrivalReservations.ContainsKey(shuttleUid) && !HasComp<FTLComponent>(shuttleUid))
+                .ToArray();
             foreach (var shuttleUid in staleArrivals)
             {
                 sector.PendingArrivals.Remove(shuttleUid);
@@ -280,30 +308,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
             }
 
             if (staleArrivals.Length > 0)
-            {
-                _emptySince.Remove(uid);
                 NotifySectorChanged(uid);
-            }
-
-            if (sector.State != NsvBluespaceSectorState.Ready ||
-                sector.ForeignGrids.Count != 0 ||
-                sector.PendingArrivals.Count != 0)
-            {
-                _emptySince.Remove(uid);
-                continue;
-            }
-
-            if (!_emptySince.TryGetValue(uid, out var emptySince))
-            {
-                _emptySince[uid] = _timing.CurTime;
-                continue;
-            }
-
-            if (_timing.CurTime - emptySince >= CleanupDelay &&
-                _sectors.TryDispose((uid, sector)))
-            {
-                _emptySince.Remove(uid);
-            }
         }
     }
 
@@ -326,21 +331,55 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
 
     private void OnFtlCompleted(ref FTLCompletedEvent ev)
     {
-        RemovePendingArrival(ev.Entity);
-
         if (!TryComp<NsvBluespaceSectorInstanceComponent>(ev.MapUid, out var sector))
         {
+            CancelArrival(ev.Entity);
+            RemovePendingArrival(ev.Entity);
             _encounters.MarkReturnCompleted(ev.Entity, ev.MapUid);
             NotifyShuttleChanged(ev.Entity);
             return;
         }
 
-        _factions.SetFaction(ev.Entity, PlayerFaction);
         sector.ForeignGrids.Add(ev.Entity);
+        CompleteArrival(ev.Entity, ev.MapUid);
+        _factions.SetFaction(ev.Entity, PlayerFaction);
         _patrolContracts.OnSectorArrival(ev.MapUid, ev.Entity);
-        _emptySince.Remove(ev.MapUid);
         NotifySectorChanged(ev.MapUid);
         NotifyShuttleChanged(ev.Entity);
+    }
+
+    private void CancelArrival(EntityUid shuttleUid)
+    {
+        if (!_arrivalReservations.Remove(shuttleUid, out var sectorMap))
+            return;
+
+        if (!TryComp<NsvBluespaceSectorInstanceComponent>(sectorMap, out var sector))
+            return;
+
+        sector.PendingArrivals.Remove(shuttleUid);
+        sector.ForeignGridFactionSnapshots.Remove(shuttleUid);
+        sector.ReturnDestinations.Remove(shuttleUid);
+        NotifySectorChanged(sectorMap);
+    }
+
+    private void CompleteArrival(EntityUid shuttleUid, EntityUid destinationMap)
+    {
+        if (!_arrivalReservations.Remove(shuttleUid, out var sectorMap))
+        {
+            RemovePendingArrival(shuttleUid);
+            return;
+        }
+
+        if (!TryComp<NsvBluespaceSectorInstanceComponent>(sectorMap, out var sector))
+            return;
+
+        sector.PendingArrivals.Remove(shuttleUid);
+        if (sectorMap == destinationMap)
+            return;
+
+        sector.ForeignGridFactionSnapshots.Remove(shuttleUid);
+        sector.ReturnDestinations.Remove(shuttleUid);
+        NotifySectorChanged(sectorMap);
     }
 
     private void RestoreForeignGridFaction(
@@ -367,13 +406,12 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
 
     private void RemovePendingArrival(EntityUid shuttleUid)
     {
-        var query = EntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
+        var query = EntityManager.AllEntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
         while (query.MoveNext(out var uid, out var sector))
         {
             if (!sector.PendingArrivals.Remove(shuttleUid))
                 continue;
 
-            _emptySince.Remove(uid);
             NotifySectorChanged(uid);
         }
     }
