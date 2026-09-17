@@ -1,648 +1,325 @@
-# NSV 动态 Sector 休眠与状态保持
+# NSV 持久星区休眠目标设计
 
-## 范围与结论
+## 目标与当前基线
 
-本文分析 NSV 动态 bluespace sector 在同一次服务器运行期间实现状态连续性的方案。目标是让有玩家的 sector 保持完整实时模拟，无人 sector 停止高成本更新，同时保留舰船、残骸、库存、损伤和地图修改。
+目标是在**同一次服务器运行期间**保留已访问星区的 map、grid、entity、UID、库存、损伤和地图修改，同时暂停无人地图的大部分实时模拟。
 
-本文是设计分析，相关休眠系统尚未实现。
+当前代码已提供单向休眠生命周期：
 
-推荐将功能分为两个层级：
+- 创建并缓存 template/node sector，重复访问复用同一 map 和实体实例；
+- FTL 只进入 `Ready` 目标，并维护 arrival reservation、返回地址和 faction 恢复；
+- 普通空置不会自动销毁 cached sector，`TryDispose()` 仅用于明确的最终销毁；
+- LifecycleSystem 每 5 秒通过 `AllEntityQueryEnumerator` 重建按 map UID 索引的 registry 快照；
+- registry 聚合存活玩家、断线宽限期内角色、distinct AI 舰 grid 和玩家派系舰，并计算固定起点、只延长不缩短的动态 deadline；
+- 空闲 `Ready` sector 会进入仍然运行的 `PreparingSleep`，deadline 到达后通过冻结前后两次权威复检并提交 paused `Sleeping`；
+- 冻结失败会立即 unpause、恢复 `Ready` 并清空本轮时间窗口；
+- 生命周期状态变化会刷新受影响 sector 内已打开的导航控制台；
+- `nsvsectormonitor` 可查看现有 sector 状态和集合计数。
 
-1. **首版：保留地图和实体，使用引擎原生 map pause**
-   - 实现成本和风险可控；
-   - 保留现有 `EntityUid`、组件运行时状态和实体引用；
-   - 可以停止大部分 AI、物理、碰撞和普通实体更新；
-   - 满足同一次服务器运行期间的状态连续性。
-2. **后续：序列化、删除地图并重新加载**
-   - 可释放地图占用的内存；
-   - 需要解决运行时字段、跨地图引用、power/node network、station、docking、任务和 timer 的恢复；
-   - 不适合作为首版。
-
-当前 NSV sector 在空置两分钟后会直接销毁，而不是休眠：
-
-- 空置检测位于 `Content.Server/_NSV/Bluespace/Sectors/NsvBluespaceSectorTravelSystem.cs`；
-- 最终通过 `NsvBluespaceSectorSystem.TryDispose()` 调用 `DeleteMap()`；
-- 再次访问同一模板或节点时会从 prototype 和 seed 重新生成，因此之前的破坏、移动和拾取状态不会保留。
-
-首版最自然的改动是将“空置后销毁”替换成“空置后暂停”，保留真正销毁作为管理员操作、回合结束清理或内存回收机制。
-
-## 当前 NSV sector 生命周期
-
-`NsvBluespaceSectorInstanceComponent` 当前状态包括：
+当前 P3 只实现 `Ready → PreparingSleep → Sleeping`。`Waking`、must-run blocker registry、统一 `RequestWake()` 和调用方唤醒迁移仍未实现。以下内容同时记录当前行为与后续目标：
 
 ```text
-Requested
-Planning
-Applying
-Ready
-Draining
-Disposed
-Failed
+周期 registry 扫描
+→ ActiveLivingPlayers 派生计数
+→ 动态 SleepDeadline
+→ 冻结提交状态机
+→ 统一 RequestWake() 解冻接口
 ```
 
-创建流程：
+本文不承诺跨服务器重启恢复，也不在首版实现后台舰队战斗、完整快照卸载或磁盘存档。
 
-```text
-规划布局
-  → 创建未初始化、暂停的 map
-  → 按 module 加载 grid、实体和小行星
-  → DoMapInitialize
-  → SetPaused(false)
-  → Ready
-```
+## 代码边界
 
-实例组件当前记录：
+当前相关代码：
 
-```text
-TemplateId / StarmapId / NodeId / Seed
-MapId
-OwnedGrids / OwnedEntities
-ForeignGrids / PendingArrivals
-ReturnDestinations
-ForeignGridFactionSnapshots
-RelationOverrides
-EncounterController
-```
+- `Content.Server/_NSV/Bluespace/Sectors/NsvBluespaceSectorSystem.cs`
+- `Content.Server/_NSV/Bluespace/Sectors/NsvBluespaceSectorLifecycleSystem.cs`
+- `Content.Server/_NSV/Bluespace/Sectors/NsvBluespaceSectorTravelSystem.cs`
+- `Content.Server/_NSV/Bluespace/Sectors/NsvBluespaceSectorInstanceComponent.cs`
 
-离开与销毁流程：
+目标职责划分：
 
-```text
-最后一个 ForeignGrid 离开
-  → PendingArrivals 为空
-  → 等待 2 分钟
-  → Ready → Draining
-  → encounter PreDispose
-  → DeleteMap
-```
+| 系统 | 职责 |
+| --- | --- |
+| SectorSystem | 创建、装配、注册和最终销毁物理 sector |
+| LifecycleSystem | 周期扫描、休眠资格、deadline，以及后续 pause/unpause、进入门禁和唤醒 |
+| TravelSystem | 真实 shuttle FTL、返回地址、抵达预留和失败清理 |
+| 后续 StrategicSystem | 仅处理 map 外纯数据舰队和世界时间，不直接修改实时 map |
 
-现有空置判断实际上统计的是外来 shuttle grid，而不是地图上的玩家。它会导致：
+`OwnedGrids` 是旧生成记录，将从归属和生命周期协议中废弃。它和 `OwnedEntities` 都不能作为玩家数量、休眠资格或舰船实际位置的权威来源；物理位置以 `Transform.MapUid` 为准。
 
-- 无人的废弃 shuttle 持续阻止销毁；
-- 未登记为 `ForeignGrid` 的玩家或实体无法阻止销毁；
-- 无法区分“必须保留”和“必须持续模拟”。
+## 引擎语义
 
-## 引擎 map pause 能力
-
-RobustToolbox 已提供地图级暂停：
+休眠使用：
 
 ```csharp
 _map.SetPaused(mapId, true);
 _map.SetPaused(mapId, false);
 ```
 
-`SharedMapSystem.SetPaused()` 会递归设置 map entity 及其所有 transform 子实体的 paused 状态。
+原生 pause 会递归暂停 map transform 子树，普通实体查询、物理和多数实体系统会跳过暂停实体，因此可以停止大部分 AI、steering、碰撞和移动。
 
-普通 `EntityQuery` 和 `EntityQueryEnumerator` 默认排除 paused entity，因此大多数以下更新会停止：
+但 pause 不是全局事务：
 
-- NSV 舰船 AI；
-- steering 与 targeting；
-- 普通物理求解和碰撞；
-- 普通移动控制；
-- 使用实体查询的 timer/despawn；
-- 大部分 power consumer、supplier 和 battery 更新；
-- 其他按实体查询运行的实时系统。
+- `AllEntityQuery` 和直接 UID 查询仍可访问暂停实体；
+- 全局 timer、map 外 controller 和任务系统不会自动暂停；
+- `PhysicsComponent.IgnorePaused` 可以绕过普通物理暂停；
+- pause/unpause 会同步触发事件；
+- 任意直接 `SetPaused(false)` 都可能绕过生命周期门禁。
 
-暂停不会删除或重建实体，因此会原样保留：
+因此必须审计上述路径。无法安全暂停的任务应注册专用 must-run blocker，而不是依赖地图碰巧持续运行。
 
-- `EntityUid` 和 transform parent；
-- grid、舰船、空间站和残骸；
-- tile 与建筑修改；
-- 容器、库存和装备；
-- 弹药、武器状态和冷却组件；
-- 护盾、损伤和供电组件状态；
-- faction；
-- encounter/objective 的现有 UID 引用；
-- 已删除实体的删除事实。
+## 核心不变量
 
-但 map pause 不是绝对的全局 scheduler freeze：
+1. `PreparingSleep` 期间地图仍然 unpaused；只有 `Sleeping` 的 map 才 paused。
+2. `ActiveLivingPlayers > 0` 时不能进入或保持休眠准备。
+3. 迁移提交、arrival reservation 和 must-run task blocker 是硬 blocker。
+4. AI 舰和无人玩家派系舰只延长休眠前时间，不永久阻止休眠。
+5. 所有实时访问都必须先通过 `RequestWake()`；调用方不得直接 unpause。
+6. 冻结前重新计算权威状态，pause 同步回调后再次验证。
+7. sleep/wake 保留同一 map 和实体实例，不重新运行模板，也不增加 `InstanceGeneration`。
+8. 普通空置只能休眠，不能调用最终销毁。
 
-- `AllEntityQuery` 不自动排除 paused entity；
-- `Timer.Spawn` 等全局 timer 不属于特定 map；
-- `PhysicsComponent.IgnorePaused` 可以绕过普通暂停行为；
-- nullspace 中的 encounter controller 不属于 sector map；
-- atmos、network 或其他系统可能在组件之外维护缓存和队列。
-
-因此，首版仍需审计特殊查询和全局回调，并通过 profiler 验证休眠后的实际 CPU 降幅。
-
-## 推荐状态机
-
-保留 `Ready` 作为内部的 `ACTIVE`，避免重命名影响现有 travel、encounter 和 UI 代码。建议增加：
-
-```text
-Ready             完整实时模拟，对应 ACTIVE
-PreparingSleep    阻止新写入并二次检查休眠条件
-Sleeping          map 已暂停
-Waking            停止战略结算并恢复实时状态
-Draining          最终销毁
-```
-
-状态转换：
+## 生命周期状态机
 
 ```text
 Applying → Ready
-Ready → PreparingSleep → Sleeping
-Sleeping → Waking → Ready
-Ready/Sleeping → Draining → Disposed
+
+Ready
+  └─ 周期扫描发现无活跃存活玩家且无硬 blocker
+       → PreparingSleep
+
+PreparingSleep
+  ├─ 玩家回来或出现硬 blocker → Ready
+  ├─ deadline 未到             → PreparingSleep
+  └─ deadline 到达并通过冻结复检
+       → Sleeping
+
+Sleeping
+  └─ RequestWake(reason) → Waking → Ready
+
+Ready/Sleeping
+  └─ 明确最终销毁授权 → Draining → 删除 map 与 instance entity
 ```
 
-`PreparingSleep` 和 `Waking` 用于防止快速进出、FTL 到达和后台结算造成重复切换。
-
-## 休眠协调系统
-
-建议新增独立的 `NsvBluespaceSectorSleepSystem`，不要将全部逻辑继续放入 travel system。
-
-其职责包括：
-
-- 维护 active/sleeping sector 注册表；
-- 统计地图上的连接玩家；
-- 检查 pending arrival、FTL 和 sleep blocker；
-- 执行进入休眠和恢复；
-- 管理战略层与实时层的结算所有权；
-- 提供管理员强制休眠、唤醒和最终销毁接口；
-- 记录状态切换原因、时间和 generation。
-
-暂停后普通实体查询不会再枚举到 sector map 本身，因此协调系统不能只使用：
-
-```csharp
-EntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>()
-```
-
-应使用 `NsvBluespaceSectorSystem` 已有的 active sector 字典，或由 sector 创建/销毁事件维护独立的 map UID 注册表。唤醒必须通过已知 map UID 直接访问 Sleeping sector。
-
-## 休眠条件
-
-建议条件为：
-
-```text
-sector.State == Ready
-AND 没有连接玩家的 AttachedEntity 位于该 map
-AND PendingArrivals.Count == 0
-AND 没有正在进入或离开的 FTL transition
-AND 不存在有效的 sleep blocker
-AND 空置时间达到 SleepDelay
-```
-
-玩家统计应使用 `IPlayerManager.Sessions` 与 `AttachedEntity`，再检查实体的 `Transform.MapUid`。`ForeignGrids` 仍用于 sector travel、faction 和 encounter bookkeeping，但不应单独代表玩家数量。
-
-### 保留与阻止休眠分离
-
-应区分：
-
-```text
-NsvSectorPersistent
-    对象必须保留，但不一定要求地图继续实时模拟
-
-NsvSectorSleepBlocker
-    对象或任务存在时，地图不能进入休眠
-```
-
-建议语义：
-
-| 对象 | 必须保留 | 默认阻止休眠 |
-| --- | ---: | ---: |
-| 断线玩家身体 | 是 | 否 |
-| 玩家舰船 | 是 | 否 |
-| 任务目标核心 | 是 | 否 |
-| 正在执行 FTL 的 shuttle | 是 | 是 |
-| 不允许暂停的任务倒计时 | 是 | 是 |
-| 管理员测试对象 | 可配置 | 可配置 |
-
-关键任务对象不应因地图休眠被清理，但是否保持地图活跃应由独立规则决定。
-
-## 进入休眠
-
-推荐流程：
-
-```text
-Ready → PreparingSleep
-  → 阻止新的 arrival 和战略写入
-  → 再次检查玩家、PendingArrivals、FTL 和 blocker
-  → 处理明确允许清理的瞬时对象
-  → 创建或更新战略层记录
-  → State = Sleeping
-  → SetPaused(mapId, true)
-```
-
-必须在真正暂停前进行第二次条件检查，因为初次检查后可能出现：
-
-- 玩家重新连接；
-- shuttle 开始到达；
-- 新任务创建；
-- encounter 状态变化；
-- 管理员添加 blocker。
-
-如果检查失败，应回到 `Ready`，不得留下部分清理或半初始化的战略状态。
-
-## 恢复地图
-
-当前 `NsvBluespaceSectorSystem.TryGetOrCreate()` 只接受 `Ready` sector。增加 Sleeping 后应改为：
-
-```text
-找到 Ready sector
-  → 直接返回
-
-找到 Sleeping sector
-  → TryWakeSector
-  → 唤醒完成后返回
-
-找到 PreparingSleep/Waking sector
-  → 等待、排队或拒绝重复切换
-
-没有现有 sector
-  → 正常创建
-```
-
-恢复顺序：
-
-```text
-Sleeping → Waking
-  → 战略层进入 Transition，停止后台 tick
-  → 应用累计任务、增援和移动结果
-  → 处理战略层已摧毁对象的 tombstone
-  → SetPaused(mapId, false)
-  → 刷新需要重建的 AI 感知和系统缓存
-  → Waking → Ready
-  → 允许 FTL arrival 或玩家进入
-```
-
-`NsvBluespaceSectorTravelSystem.TryStartArrival()` 必须在地图完成唤醒后才能调用 `FTLToCoordinates()`。
-
-玩家断线后重新连接也是独立唤醒入口。如果玩家的 `AttachedEntity` 位于 Sleeping map，应在允许玩家操作前唤醒该 map。
-
-## 状态保持
-
-### 首版内存保持
-
-首版无需为每个组件建立手写 snapshot。现有 ECS 状态继续保存在原实体中：
-
-```text
-位置与朝向      TransformComponent
-库存            ContainerManager
-弹药            Gun/Magazine/AmmoProvider/Container
-阵营            NsvBluespaceFactionComponent
-生命和损伤      各实体 Damageable、结构与舰船组件
-地图修改        grid tile 与现有实体树
-任务状态        encounter 和 objective 组件
-自定义状态      原组件运行时字段
-```
-
-由于不会重新运行 sector generator：
-
-- 已摧毁实体不会复活；
-- 已迁出的实体不会在原 sector 再生成；
-- 新进入实体不会因模板加载而复制；
-- 基础模板不会覆盖已有 tile 或建筑修改。
-
-### 逻辑唯一 ID
-
-`EntityUid` 只保证当前 `EntityManager` 生命周期内的运行时身份。纯内存休眠时它保持稳定，但战略层、UNLOADED 和未来跨重启存档需要独立逻辑 ID。
-
-建议仅给战略重要的根对象分配 ID：
-
-```text
-sector map
-主要舰船 grid
-空间站 grid
-重要残骸
-encounter controller
-objective target
-需要跨 sector 移动的战略舰队
-```
-
-不建议给每一面墙、子弹和普通物品生成 GUID。
-
-组件和注册表可采用：
-
-```text
-NsvPersistentIdComponent
-  Id: Guid
-
-LogicalIdRegistry
-  LogicalId
-    → Live EntityUid?
-    → CurrentSectorId
-    → Prototype/VesselId
-    → Alive / Destroyed / Migrated
-    → Generation
-```
-
-必须保留 destroyed tombstone，以区分：
-
-```text
-对象尚未生成
-对象已经被摧毁
-```
-
-同一逻辑 ID 在任何时刻最多只能对应一个 live entity。
-
-## 瞬时对象清理
-
-不应在休眠时删除所有带 `TimedDespawnComponent` 的实体，因为它可能包含仍有玩法意义的对象，例如手雷、导弹、鱼雷或任务载体。
-
-推荐：
-
-1. 保留现有两分钟空置宽限期，让大部分弹丸和视觉效果自然结束；
-2. 增加明确的 `NsvSectorSleepTransientComponent`；
-3. 或使用经过审核的组件/原型白名单；
-4. 删除前排除 player、persistent 和 encounter member；
-5. 清理结果必须是幂等的。
-
-建议默认规则：
-
-| 类型 | 休眠处理 |
-| --- | --- |
-| 普通短寿命弹丸 | 清理 |
-| 纯视觉特效 | 清理 |
-| 临时 AI 路径缓存 | 清空或忽略 |
-| 持续光束/爆炸载体 | 按具体类型审核 |
-| 手雷、导弹、鱼雷 | 不通过通用 TimedDespawn 规则删除 |
-| 玩家和容器内容 | 永不删除 |
-| encounter/objective 对象 | 永不通过通用规则删除 |
-
-如果不清理某个弹丸，map pause 会精确冻结它，恢复后它会继续运动。这保持了状态一致性，但是否符合视觉和玩法预期需要按武器类型决定。
-
-## 后台战略模拟
-
-后台模拟不应通过周期性唤醒整个 map 运行几帧实现。暂停实体默认不参加普通查询，且临时唤醒会重新启动物理、AI、power 和其他实时系统。
-
-应将战略状态放在 nullspace manager、全局系统或独立 registry 中：
-
-```text
-NsvSectorStrategicState
-  SectorLogicalId
-  SimulationOwner
-  LastUpdateTime
-  StrategicTickInterval
-  FleetRecords
-  ReinforcementTimers
-  MissionState
-  PendingResults
-```
-
-实时和战略模拟必须互斥：
-
-```text
-SimulationOwner.Tactical
-SimulationOwner.Transition
-SimulationOwner.Strategic
-```
-
-规则：
-
-```text
-Ready       只能由实时系统结算
-Sleeping    只能由战略系统结算
-Transition  两边都不能结算
-```
-
-战略层不应在每个低频 tick 直接修改 paused map 内大量实体。更安全的做法是累计离散结果，在 Waking 阶段一次性应用。
-
-首版适合支持：
-
-- 任务全局截止时间；
-- 增援倒计时；
-- faction 战略计数；
-- 完全抽象化的 NPC fleet 路线；
-- 不要求映射具体 tile 和设备损伤的事件。
-
-首版不适合支持：
-
-- 玩家实际舰船的抽象战斗；
-- tile、炮塔和弹药级后台损伤；
-- docked grid 的跨 sector 战略迁移；
-- 通过临时唤醒执行完整 AI 战斗。
-
-## 需求映射
-
-| 需求 | 首版可行性 | 实现方式 |
+| 状态 | MapPaused | 外部实时写入 |
 | --- | --- | --- |
-| R1 ACTIVE/SLEEPING | 高 | `Ready/Sleeping` + `SetPaused` |
-| R1 UNLOADED | 低 | 后续自定义 snapshot 和恢复 |
-| R2 休眠条件 | 高 | 玩家检测、PendingArrivals、blocker、宽限期 |
-| R3 状态保留 | 很高 | 保留 paused map，不重建实体 |
-| R4 实体数据 | 很高 | 原 ECS 组件继续存在；重要根对象增加逻辑 ID |
-| R5 瞬时清理 | 中 | 明确 marker 或审核过的白名单 |
-| R6 后台模拟 | 部分 | 简单计时可行；抽象战斗困难 |
-| R7 唯一性 | 高 | 内存保持 UID；战略层使用 logical ID 和 tombstone |
-| R8 关键对象保护 | 高 | Persistent 与 SleepBlocker 分离 |
-| R9 安全切换 | 中高 | PreparingSleep/Waking、generation、二次检查 |
-| R10 停止高成本更新 | 高但非绝对 | map pause + 特殊系统审计和性能验证 |
+| Ready | false | 经正常门禁允许 |
+| PreparingSleep | false | 拒绝新进入；地图内既有模拟和 encounter 状态转换继续运行，玩家或硬 blocker 会取消准备 |
+| Sleeping | true | 禁止 |
+| Waking | true，直到恢复提交 | 排队，只有恢复协调器可写 |
+| Draining | 终止流程 | 拒绝；销毁完成后 instance entity 不再存在 |
 
-## 安全切换与幂等性
+`TransitionEpoch` 只在冻结提交、wake 或最终销毁尝试时增加，用于拒绝旧回调；进入 `PreparingSleep` 本身不增加 epoch。
 
-建议每个 sector 保存：
+## 周期扫描
+
+LifecycleSystem 使用可配置的 `LifecycleScanInterval` 扫描统一 sector registry，建议默认 5 秒。Sleeping map 不能依赖普通 `EntityQueryEnumerator` 发现，因为普通查询会跳过暂停实体。
+
+每轮先单次遍历权威数据，按 `MapUid` 聚合：
 
 ```text
-TransitionGeneration
-LastStateChange
-SimulationOwner
-PendingWakeReason
+MapUid → ActiveLivingPlayers
+MapUid → ActiveAIShips
+MapUid → HasPlayerFactionShip
+MapUid → MigrationOrArrivalBlockers
+MapUid → MustRunTaskBlockers
+```
+
+成本应接近：
+
+```text
+O(Sectors + Sessions + AIShips)
+```
+
+禁止对每个 sector 分别遍历所有玩家和 AI 舰船。
+
+扫描逻辑：
+
+```text
+Ready:
+    玩家数 > 0 或有硬 blocker → 保持 Ready
+    否则 → 计算 deadline，进入 PreparingSleep
+
+PreparingSleep:
+    玩家数 > 0 或有硬 blocker → 取消准备，回到 Ready
+    deadline 未到 → 保持 PreparingSleep
+    deadline 到达 → TryCommitSleep()
+
+Sleeping:
+    当前 P3 保持 paused 和 Sleeping，清除 countdown
+    若发现被外部直接 unpause，则重新 pause，避免逻辑状态和 map 状态分裂
+    后续 P4 等待 RequestWake()；发现 blocker 时调用 RequestWake(Reconciliation) 兜底
+```
+
+事件可以即时更新缓存或触发后续唤醒，但周期扫描和冻结前完整重算才是最终真相，避免漏事件导致永久不休眠或错误冻结。
+
+## ActiveLivingPlayers
+
+`ActiveLivingPlayers` 按 session 去重，并从控制关系、生命状态、连接状态和受控实体的实际 `Transform.MapUid` 派生，不能使用 HashSet 数量或简单进出事件累计代替。
+
+| 玩家状态 | 阻止休眠 |
+| --- | --- |
+| 在线、存活并控制本地图内角色 | 是 |
+| 昏迷、倒地但仍存活 | 是 |
+| 跨地图远程控制本地图内存活单位 | 是 |
+| 已死亡，尸体留在地图 | 否 |
+| 旁观幽灵、管理员相机、只读 remote eye | 默认否 |
+| 掉线但角色仍存活 | 仅在 `DisconnectedPlayerGrace` 内 |
+| 正在抵达本地图 | 由 arrival reservation 阻止 |
+
+当前实现按 `NetUserId` 去重，`Alive` 和 `Critical` 计入，dead、ghost 和无 `MobStateComponent` 的实体不计入。断线时保存受控实体和时间，30 秒宽限期比较集中在单一函数中；每轮扫描重新检查该实体当前的生命状态和 `Transform.MapUid`。
+
+只读 `ViewSubscriptions` 不直接计入玩家数。确实需要地图继续运行的管理工具或任务必须注册专用 must-run blocker。
+
+## 休眠前时间计算
+
+玩家数归零只表示可以进入 `PreparingSleep`，不表示立即 pause。
+
+```text
+SleepDelay = BaseSleepDelay
+           + min(ActiveAIShips, AIShipCountCap) × PerAIShipDelay
+           + (HasPlayerFactionShip ? PlayerShipDelay : 0)
+
+SleepDelay = clamp(SleepDelay, MinSleepDelay, MaxSleepDelay)
+SleepDeadline = SleepEligibleSince + SleepDelay
+```
+
+首版建议：
+
+```text
+LifecycleScanInterval = 5 秒
+BaseSleepDelay        = 30 秒
+PerAIShipDelay        = 10 秒
+AIShipCountCap        = 12
+PlayerShipDelay       = 90 秒
+MinSleepDelay         = 30 秒
+MaxSleepDelay         = 5 分钟
 ```
 
 规则：
 
-- 相同 generation 的 sleep/wake 请求只能提交一次；
-- `Sleeping` 再次休眠直接成功，不重复清理；
-- `Ready` 再次唤醒直接成功，不重复应用战略结果；
-- Waking 期间 arrival 排队或失败，不能直接进入暂停地图；
-- PreparingSleep 期间出现玩家或 arrival 时回滚到 Ready；
-- 战略结果带结算 generation，防止恢复失败后重复伤害或重复增援；
-- `TryDispose()` 只用于真正销毁，不参与普通休眠。
+- `SleepEligibleSince` 在进入 `PreparingSleep` 时固定；
+- 后续复杂度增加时可以把 deadline 延长为 `SleepEligibleSince + NewDelay`；
+- deadline 不缩短，也不能改成 `now + NewDelay`；
+- 所有延长都受 `MaxSleepDelay` 限制；
+- 准备被取消后清除本轮时间，下次重新计算。
 
-对于内存暂停，`SetPaused()` 本身没有复杂的序列化失败路径。未来实现 UNLOADED 时，应采用 staging load：新实例和引用全部恢复成功后，再原子替换 registry 中的 live UID。
+这避免 AI 数量抖动或持续生成实体形成无限滑动 deadline。
 
-## 测试建议
+当前实现把 `ActiveLivingPlayers > 0` 和 pending arrival 作为 P3 硬 blocker。无 blocker 的 `Ready` sector 会立即进入未暂停的 `PreparingSleep` 并保留时间窗口；AI 舰按 distinct `GridUid` 计数，玩家派系舰按 grid 的当前 faction 判定，两者只延长 deadline。资格失效时恢复 `Ready`、清空时间，再次满足条件时从新的 `SleepEligibleSince` 起算。`ForeignGrids` 仅作为监控指标，不单独阻止休眠。
 
-扩展 NSV sector integration test，至少覆盖：
+## 冻结提交
 
-1. 无玩家经过延迟后进入 Sleeping；
-2. 多名玩家只离开一部分时不休眠；
-3. `PendingArrivals` 存在时不休眠；
-4. sleep blocker 存在时不休眠；
-5. 玩家重连或 FTL 到达前自动唤醒；
-6. 睡眠前后关键实体 `EntityUid` 不变；
-7. 库存、弹药、损伤、位置和 faction 不变；
-8. 修改过的 tile 不恢复模板值；
-9. 已删除实体不重新生成；
-10. 睡眠期间 NSV AI accumulator 和物理位置不变化；
-11. 快速反复 sleep/wake 不重复执行；
-12. encounter controller、participant 和 objective UID 仍有效；
-13. 同一个 logical ID 不会注册两个 live entity；
-14. transient cleanup 不删除玩家、任务对象和容器内容；
-15. sector 最终销毁仍正确清理 active registry 和 encounter；
-16. profiler 确认 sleeping map 的 AI、physics 和 collision 成本显著下降。
+deadline 到达后执行 `TryCommitSleep()`。当前 P3 提交顺序为：
 
-## 推荐实施顺序
+1. 确认 registry、map instance 和 `PreparingSleep` 状态仍然有效，并取得单一 transition owner 防止同步重入。
+2. 从当前 session、断线宽限记录、角色生命状态、实际 `Transform.MapUid` 和 pending arrival 重新派生硬 blocker。
+3. 若出现玩家或 arrival，保持 map unpaused，恢复 `Ready` 并清空时间窗口。
+4. 确认 map 尚未暂停后调用 `SetPaused(true)`。
+5. 处理同步 pause 回调，再次验证 transition owner、instance 状态、map paused、玩家和 arrival。
+6. 若复检失败，立即 `SetPaused(false)`、恢复 `Ready` 并清空时间窗口。
+7. 校验通过后提交 `Sleeping`，registry 在同一调用中同步更新、清除 countdown，并通知导航显示刷新。
 
-### 阶段 1：内存休眠
+该提交片段不能跨到下一次生命周期扫描。验证失败时保留原 map 和实体；不得删除地图后从模板重建来掩盖失败。`TransitionEpoch` 和 must-run task blocker 属于后续 wake/任务协调阶段，P3 尚未引入。
+
+## 统一解冻接口
+
+所有玩家重连、FTL、管理员转移、任务实时化和需要真实场景的战略请求都必须调用：
 
 ```text
-扩展 sector state
-  → 玩家和 blocker 检测
-  → map pause/unpause
-  → travel 唤醒接入
-  → reconnect 唤醒
-  → 状态保持和快速切换测试
+RequestWake(sectorId, reason, requester)
 ```
 
-### 阶段 2：逻辑身份
+| 当前状态 | 结果 |
+| --- | --- |
+| Ready | 幂等成功 |
+| PreparingSleep | 取消 deadline，恢复 Ready |
+| Sleeping | 关闭门禁，进入 Waking 并执行恢复 |
+| Waking | 合并到现有 transition，不重复 unpause |
+| Applying | 排队或等待 Ready |
+| Draining/Failed | 拒绝或返回失败 |
 
-```text
-关键实体 PersistentId
-  → global registry
-  → destroyed/migrated tombstone
-  → encounter/objective 引用适配
-```
+Sleeping 的恢复顺序：
 
-### 阶段 3：性能与容量
+1. 关闭进入门禁，增加 `TransitionEpoch`，提交 `Waking`。
+2. 校验 map、registry、实体引用和等待请求。
+3. 在 paused map 中完成允许的恢复工作。
+4. 调用 `SetPaused(false)` 并处理同步 unpause 回调。
+5. 提交 `Ready`，开放门禁并完成合并请求。
 
-```text
-明确 transient cleanup
-  → 审计 AllEntityQuery/global timer/IgnorePaused
-  → CPU 和内存指标
-  → 最大 sleeping sector 数或 LRU 策略
-```
+解冻由接口立即触发，不等待下一次周期扫描。状态事件只通知已经完成的转换，不能成为第二套 pause/unpause 执行路径。
 
-### 阶段 4：简单战略模拟
+FTL 必须先等待目标 Ready，再取得 arrival reservation、写入 travel 数据并启动真实迁移。失败或取消时必须释放预留。
 
-```text
-Tactical/Strategic 独占结算
-  → 任务时间
-  → 增援
-  → faction 状态
-  → 完全抽象化的 NPC fleet movement
-```
+## 保留、时间与销毁
 
-### 阶段 5：UNLOADED 评估
+休眠保留全部 map ECS 状态，包括 UID、tile、库存、弹药、护盾、设备损伤、位置和已删除对象的结果。未阻止休眠不表示可以删除对象。
 
-```text
-自定义 snapshot
-  → entity reference remap
-  → power/station/docking 恢复
-  → mission 和 timer 恢复
-  → staging load 与失败回滚
-```
+默认语义：
 
-### 阶段 6：长期扩展
+| 内容 | Sleeping 时行为 |
+| --- | --- |
+| 普通 NPC、AI 战斗、火灾、设备过程 | 随 map 暂停 |
+| 实体冷却和 lifetime | 应保持剩余模拟时间，需审计 pause-aware 实现 |
+| 世界时间任务 | 由专门的 map 外系统结算 |
+| 无法安全暂停的任务 | 必须注册专用 must-run blocker |
 
-```text
-抽象战斗
-跨 sector 实体迁移
-磁盘存档
-版本迁移
-跨服务器重启恢复
-```
+`TryDispose()` 与休眠不同，只能用于管理员放弃、回合结束或其他明确授权的最终销毁。销毁前仍需检查玩家、mind、迁移、任务引用和子树删除影响。
 
-## 根据当前玩法不适合直接实现的内容
+内存休眠不会释放大部分实体内存。容量不足时可以拒绝创建新持久 sector，但不能删除已有 sector 后在玩家返回时重新生成模板。
 
-### 所有访问过的 sector 永久保留
+## 验收测试
 
-NSV sector 当前是短生命周期 encounter 实例。若所有访问过的节点永久留在内存，一局中会持续积累：
+### 生命周期
 
-- entity 和 component；
-- grid 和 tile；
-- atmos 数据；
-- network state；
-- 系统外部缓存。
+- registry 扫描能发现 Ready、PreparingSleep 和 Sleeping sector；
+- 多玩家只离开一部分时不进入准备；
+- 昏迷玩家阻止休眠，尸体和旁观幽灵默认不阻止；
+- 断线宽限期、重连、复活、换角色和远程控制正确更新计数；
+- 漏失事件后，周期扫描能从权威状态修正结果。
 
-至少需要以下一种策略：
+### Deadline 与 blocker
 
-```text
-最大 sleeping sector 数
-LRU 最终销毁或卸载
-只有指定持久节点允许休眠
-已完成且无重要状态的 encounter 继续销毁
-```
+- 空地图、AI 舰和玩家派系舰得到正确 delay；
+- AI 数量有 cap，deadline 有最小值和最大值；
+- deadline 从固定起点有限延长，不滑动、不缩短；
+- 玩家、迁移预留或 task blocker 会取消准备；
+- pause 同步回调中新出现的 blocker 会撤销冻结。
 
-否则只是将 CPU 压力转换为不断增长的内存压力。
+### Wake 与迁移
 
-### 玩家离开后立即冻结所有后果
+- `RequestWake()` 对各状态符合表中语义，重复请求不会重复 unpause；
+- 玩家重连、管理员移动和 FTL 不等待扫描周期；
+- FTL 完成、失败、取消和重复回调都正确释放预留；
+- Sleeping map 未 Ready 前没有外部实体写入。
 
-完全暂停可能允许或造成：
+### 状态保持与性能
 
-- 断线冻结危险；
-- 火灾、泄漏和反应堆状态永久停止；
-- 增援和任务倒计时停止；
-- 炮弹在返回时突然继续飞行。
+- 多次 sleep/wake 后 map、UID、tile、库存、损伤和位置保持；
+- 已删除、迁出和新增实体不会复活、残留或重复；
+- AI、物理、碰撞和寻路活动在 Sleeping 时显著下降；
+- 审计 global timer、`AllEntityQuery`、`IgnorePaused` 和 map 外 controller；
+- 扫描实现不存在 `Sectors × Sessions × AIShips` 嵌套查询；
+- 容量不足不会删除已有持久世界。
 
-需要为每类系统明确使用实时模拟时间还是服务器全局时间。当前 patrol encounter 通常不允许目标完成前主动离开，但断线和非 encounter sector 仍需要处理。
+## 实施顺序
 
-### 对玩家实际舰船执行抽象战斗
+1. **已实现：** registry 周期扫描和按 map UID 的基础状态聚合。
+2. **已实现：** `ActiveLivingPlayers`、30 秒断线宽限、AI/玩家派系舰聚合和动态 deadline。
+3. **已实现：** 未暂停的 `PreparingSleep`、自动 deadline 提交、实际 map pause、冻结前后复检和失败回滚。
+4. 建立统一 `RequestWake()`，迁移所有直接唤醒和进入路径。
+5. 补充状态保持、失败注入和性能测试。
+6. 废弃 `OwnedGrids` 的生命周期用途，并替换依赖它的玩法查询。
 
-当前舰船不是简单的 HP/DPS 单位：
+## 后置能力
 
-- grid 没有统一 hull health；
-- 损伤分布于 tile、结构和设备；
-- 武器依赖供电、弹药、炮塔射界和 fire control；
-- 护盾可能由多个 emitter 组成；
-- crew 能维修、装填和关闭系统。
+以下能力不属于首版生命周期改造：
 
-Standalone ship AI 目前也因为没有可靠的 grid hull damage 指标，只能使用 shield stress。将玩家舰压缩为抽象数值会造成较大的公平性和状态映射问题。
+- map 外纯数据舰队演化和抽象战斗；
+- 战略到达、逻辑驻留与实体物化；
+- 删除物理 map 后的完整快照恢复；
+- 跨服务器重启、跨版本存档和引用 remap；
+- 保留真实 grid 的后台迁移和战损。
 
-### 使用 station 体系作为 sector 舰船注册表
-
-NSV 动态 sector generator 主要加载 grid、设置 faction 并记录 `OwnedGrids`，不会保证每艘舰船都成为逻辑 station。休眠与持久化应依赖 sector ownership 和 logical ID，而不是 `StationMemberComponent`。
-
-## 很难实现或影响很大的内容
-
-### UNLOADED 序列化与重建
-
-地图删除会递归删除 transform 子树，重新加载后通常会发生：
-
-- `EntityUid` 和 `MapId` 改变；
-- 外部 `EntityCoordinates` 锚点失效；
-- encounter/controller/objective UID 引用失效；
-- station membership 需要重建；
-- deed 和 shuttle record 可能指向旧实体；
-- docking joint 需要重新建立；
-- power/node network 存在序列化限制；
-- 全局 timer 不可直接序列化；
-- 未声明为可序列化的运行时字段丢失。
-
-`NsvBluespaceSectorInstanceComponent` 当前的 ownership、arrival、return destination 和 encounter 字段主要是运行时集合，不能直接依靠通用 map YAML 自动恢复。
-
-### 基础模板加修改差异
-
-使用 prototype/seed 重建基础地图，再应用变化 diff，看似节省空间，但必须正确表达：
-
-- 删除实体；
-- 迁出实体；
-- 新生成实体；
-- 容器和实体引用；
-- tile 和结构变化；
-- prototype 更新后的兼容性。
-
-任何遗漏都可能导致实体复活、重复或状态被模板覆盖。以后做存档时，完整 snapshot 加显式 sidecar 和版本迁移通常比任意 ECS delta 更可控。
-
-### 休眠期间跨 sector 移动实际 grid
-
-跨 sector 战略移动需要同步：
-
-- 实际 grid 的 map parent；
-- logical ID registry；
-- faction；
-- encounter membership；
-- station membership；
-- docked grids；
-- 外部引用；
-- 来源和目标 sector 的加载状态。
-
-它不应被实现成单纯修改 `Transform` 或 `CurrentSectorId`。应在战略舰队模型和 logical ID registry 成熟后单独设计。
-
-### 保证完全没有后台实时更新
-
-`SetPaused()` 可以停止大部分更新，但无法自动约束所有：
-
-- `AllEntityQuery`；
-- 全局 timer callback；
-- `IgnorePaused` physics body；
-- nullspace controller；
-- 系统外部缓存或队列。
-
-R10 必须通过代码审计、集成测试和 profiler 验证，不能只以 map 的 paused flag 作为验收标准。
-
-## 最终建议
-
-R1–R5、R7–R10 的内存休眠版本与当前 NSV sector 架构兼容，应作为第一阶段实现。它可以在不重建实体的情况下保持地图修改和运行时状态，并显著减少无人 sector 的实时更新成本。
-
-`UNLOADED`、玩家舰抽象战斗、休眠期间实际 grid 跨 sector 迁移和跨重启存档应明确后置。这些功能需要独立的持久身份、战略数据模型、引用恢复和版本迁移体系，不能作为 map pause 的简单扩展。
+后续战略系统只能处理 map 外纯数据状态。实时 map 的 pause、wake、门禁和物化仍由生命周期系统负责；同一个 logical ship 不得同时存在纯数据和 live grid 两份可写表示。

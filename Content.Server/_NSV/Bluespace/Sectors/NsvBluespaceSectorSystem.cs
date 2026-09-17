@@ -203,7 +203,7 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
     public bool TryDispose(Entity<NsvBluespaceSectorInstanceComponent?> sector)
     {
         if (!Resolve(sector, ref sector.Comp, false) ||
-            sector.Comp.State != NsvBluespaceSectorState.Ready ||
+            sector.Comp.State is not (NsvBluespaceSectorState.Ready or NsvBluespaceSectorState.Sleeping) ||
             sector.Comp.ForeignGrids.Count != 0 ||
             sector.Comp.PendingArrivals.Count != 0)
         {

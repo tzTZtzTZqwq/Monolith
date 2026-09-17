@@ -112,7 +112,7 @@ public sealed class NsvBluespacePatrolContractSystem : EntitySystem
             encounter.State != NsvBluespaceEncounterState.Active ||
             encounter.ObjectiveTarget != uid ||
             !TryComp<NsvBluespaceSectorInstanceComponent>(encounter.SectorMap, out var sector) ||
-            sector.State != NsvBluespaceSectorState.Ready)
+            sector.State is not (NsvBluespaceSectorState.Ready or NsvBluespaceSectorState.PreparingSleep))
         {
             return;
         }

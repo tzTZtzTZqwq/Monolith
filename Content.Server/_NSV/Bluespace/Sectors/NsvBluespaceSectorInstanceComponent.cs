@@ -8,12 +8,11 @@ namespace Content.Server._NSV.Bluespace.Sectors;
 
 public enum NsvBluespaceSectorState
 {
-    Requested,
-    Planning,
     Applying,
     Ready,
+    PreparingSleep,
+    Sleeping,
     Draining,
-    Disposed,
     Failed
 }
 
@@ -43,7 +42,7 @@ public sealed partial class NsvBluespaceSectorInstanceComponent : Component
     public MapId MapId;
 
     [ViewVariables]
-    public NsvBluespaceSectorState State = NsvBluespaceSectorState.Requested;
+    public NsvBluespaceSectorState State = NsvBluespaceSectorState.Applying;
 
     [ViewVariables]
     public readonly HashSet<EntityUid> OwnedGrids = new();

@@ -1,0 +1,9 @@
+nsv-sector-monitor-title = NSV Sector Monitor
+nsv-sector-monitor-refresh = Refresh
+nsv-sector-monitor-column-name = Name
+nsv-sector-monitor-column-id = ID
+nsv-sector-monitor-column-state = State
+nsv-sector-monitor-column-owned-grids = Owned grids
+nsv-sector-monitor-column-owned-entities = Owned entities
+nsv-sector-monitor-column-foreign-grids = Foreign grids
+nsv-sector-monitor-column-pending-arrivals = Pending arrivals
