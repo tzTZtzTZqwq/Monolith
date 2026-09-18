@@ -14,9 +14,9 @@
 - 空闲 `Ready` sector 会进入仍然运行的 `PreparingSleep`，deadline 到达后通过冻结前后两次权威复检并提交 paused `Sleeping`；
 - 冻结失败会立即 unpause、恢复 `Ready` 并清空本轮时间窗口；
 - 生命周期状态变化会刷新受影响 sector 内已打开的导航控制台；
-- `nsvsectormonitor` 可查看现有 sector 状态和集合计数。
+- `nsvsectormonitor` 可查看现有 sector 状态、集合计数、休眠保持剩余秒数，以及总量/活跃量软容量。
 
-当前 P4 已实现 `Ready → PreparingSleep → Sleeping → Waking → Ready`、must-run task blocker registry、统一 `RequestWake()`，并将缓存 sector 获取、FTL arrival、玩家重新附着/重连和存活角色跨 map 转移接入唤醒门禁。P5 将继续补充更深入的状态保持、失败注入和性能验证。以下内容同时记录当前行为与后续目标：
+当前 P4 已实现 `Ready → PreparingSleep → Sleeping → Waking → Ready`、must-run task blocker registry、统一 `RequestWake()`，并将缓存 sector 获取、FTL arrival、玩家重新附着/重连和存活角色跨 map 转移接入唤醒门禁。P5 验收聚焦多轮状态保持、失败注入、pause/unpause 路径审计和 display-only 容量监控；不要求额外的性能或 registry 扫描复杂度验证。以下内容同时记录当前行为与后续目标：
 
 ```text
 周期 registry 扫描
@@ -268,7 +268,9 @@ FTL 会以 shuttle 为 requester 请求 `Arrival` wake；只有目标同步提�
 
 `TryDispose()` 与休眠不同，只能用于管理员放弃、回合结束或其他明确授权的最终销毁。销毁前仍需检查玩家、mind、迁移、任务引用和子树删除影响。
 
-内存休眠不会释放大部分实体内存。容量不足时可以拒绝创建新持久 sector，但不能删除已有 sector 后在玩家返回时重新生成模板。
+内存休眠不会释放大部分实体内存，因此 `nsvsectormonitor` 提供两个 server-only、archived 的 display-only 软容量：持久 sector 总数默认 100，活跃 sector 数默认 15。总数包含所有仍存在的 `NsvBluespaceSectorInstanceComponent`，包括 `Sleeping`；活跃数仅包含 `Applying`、`Ready`、`PreparingSleep` 和 `Waking`，排除 `Sleeping`、`Draining` 和 `Failed`。
+
+超过软容量时，面板以警告颜色显示 current / maximum，但该值不得用于拒绝 sector 创建、缓存访问、wake、FTL 或其他生命周期操作。容量阈值只用于管理员观察；不得删除已有 sector，也不得通过从模板重建来替代持久世界。
 
 ## 验收测试
 
@@ -295,14 +297,14 @@ FTL 会以 shuttle 为 requester 请求 `Arrival` wake；只有目标同步提�
 - FTL 完成、失败、取消和重复回调都正确释放预留；
 - Sleeping map 未 Ready 前没有外部实体写入。
 
-### 状态保持与性能
+### 状态保持与容量监控
 
 - 多次 sleep/wake 后 map、UID、tile、库存、损伤和位置保持；
 - 已删除、迁出和新增实体不会复活、残留或重复；
-- AI、物理、碰撞和寻路活动在 Sleeping 时显著下降；
-- 审计 global timer、`AllEntityQuery`、`IgnorePaused` 和 map 外 controller；
-- 扫描实现不存在 `Sectors × Sessions × AIShips` 嵌套查询；
-- 容量不足不会删除已有持久世界。
+- 总量统计包含七种 lifecycle 状态，活跃量只包含 `Applying`、`Ready`、`PreparingSleep` 和 `Waking`；
+- `Sleeping` sector 仍计入总量并显示在管理面板；
+- 运行时 CVar 修改会反映到面板 current / maximum 摘要；
+- 即使两个软容量均为 0，创建、sleep、wake 和 FTL 仍不受阻止。
 
 ## 实施顺序
 
@@ -310,7 +312,7 @@ FTL 会以 shuttle 为 requester 请求 `Arrival` wake；只有目标同步提�
 2. **已实现：** `ActiveLivingPlayers`、30 秒断线宽限、AI/玩家派系舰聚合和动态 deadline。
 3. **已实现：** 未暂停的 `PreparingSleep`、自动 deadline 提交、实际 map pause、冻结前后复检和失败回滚。
 4. **已实现：** 建立统一 `RequestWake()`、`Waking`/`TransitionEpoch`、must-run blocker，并迁移缓存获取、FTL、玩家重连与存活角色跨 map 转移路径。
-5. **下一步：** 补充状态保持、失败注入和性能测试。
+5. **P5：** 补充多轮状态保持、wake 失败注入、pause/unpause 路径审计和 display-only 容量监控；不要求额外性能或扫描复杂度验证。
 6. 废弃 `OwnedGrids` 的生命周期用途，并替换依赖它的玩法查询。
 
 ## 后置能力

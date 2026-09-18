@@ -294,7 +294,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
             CancelArrival(shuttleUid);
         }
 
-        var query = EntityManager.AllEntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
+        var query = EntityManager.EntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
         while (query.MoveNext(out var uid, out var sector))
         {
             var staleArrivals = sector.PendingArrivals
@@ -406,7 +406,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
 
     private void RemovePendingArrival(EntityUid shuttleUid)
     {
-        var query = EntityManager.AllEntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
+        var query = EntityManager.EntityQueryEnumerator<NsvBluespaceSectorInstanceComponent>();
         while (query.MoveNext(out var uid, out var sector))
         {
             if (!sector.PendingArrivals.Remove(shuttleUid))

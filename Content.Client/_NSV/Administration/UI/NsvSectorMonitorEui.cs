@@ -21,7 +21,7 @@ public sealed class NsvSectorMonitorEui : BaseEui
     public override void HandleState(EuiStateBase state)
     {
         if (state is NsvSectorMonitorEuiState monitorState)
-            _window.SetRows(monitorState.Rows);
+            _window.SetState(monitorState);
     }
 
     public override void Opened()

@@ -16,6 +16,21 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
         SetRows(Array.Empty<NsvSectorMonitorRow>());
     }
 
+    public void SetState(NsvSectorMonitorEuiState state)
+    {
+        SetCapacityLabel(
+            TotalSectorCapacity,
+            "nsv-sector-monitor-total-capacity",
+            state.TotalSectorCount,
+            state.TotalSectorSoftCapacity);
+        SetCapacityLabel(
+            ActiveSectorCapacity,
+            "nsv-sector-monitor-active-capacity",
+            state.ActiveSectorCount,
+            state.ActiveSectorSoftCapacity);
+        SetRows(state.Rows);
+    }
+
     public void SetRows(IReadOnlyList<NsvSectorMonitorRow> rows)
     {
         Rows.RemoveAllChildren();
@@ -27,6 +42,7 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
         AddHeader("nsv-sector-monitor-column-foreign-grids", 110);
         AddHeader("nsv-sector-monitor-column-pending-arrivals", 130);
         AddHeader("nsv-sector-monitor-column-must-run-blockers", 130);
+        AddHeader("nsv-sector-monitor-column-sleep-hold", 120);
 
         foreach (var row in rows)
         {
@@ -42,7 +58,14 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
             AddCell(row.ForeignGrids.ToString(), 110);
             AddCell(row.PendingArrivals.ToString(), 130);
             AddCell(row.MustRunTaskBlockers.ToString(), 130);
+            AddCell(row.SleepHoldSeconds?.ToString() ?? "-", 120);
         }
+    }
+
+    private static void SetCapacityLabel(Label label, string locId, int count, int maximum)
+    {
+        label.Text = Loc.GetString(locId, ("count", count), ("maximum", maximum));
+        label.FontColorOverride = count > maximum ? StyleNano.ConcerningOrangeFore : null;
     }
 
     private void AddHeader(string locId, float width)
