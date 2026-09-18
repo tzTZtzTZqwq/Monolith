@@ -1,0 +1,14 @@
+nsv-sector-monitor-title = NSV Sector Monitor
+nsv-sector-monitor-refresh = Refresh
+nsv-sector-monitor-total-capacity = Total sectors: { $count } / { $maximum }
+nsv-sector-monitor-active-capacity = Active sectors: { $count } / { $maximum }
+nsv-sector-monitor-capacity-note = Soft capacities are display-only and do not block sector generation, wake, or travel.
+nsv-sector-monitor-column-name = Name
+nsv-sector-monitor-column-id = ID
+nsv-sector-monitor-column-state = State
+nsv-sector-monitor-column-owned-grids = Owned grids
+nsv-sector-monitor-column-owned-entities = Owned entities
+nsv-sector-monitor-column-foreign-grids = Foreign grids
+nsv-sector-monitor-column-pending-arrivals = Pending arrivals
+nsv-sector-monitor-column-must-run-blockers = Must-run blockers
+nsv-sector-monitor-column-sleep-hold = Sleep hold (s)

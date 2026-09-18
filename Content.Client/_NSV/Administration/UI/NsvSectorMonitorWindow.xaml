@@ -1,0 +1,27 @@
+<DefaultWindow xmlns="https://spacestation14.io"
+               Title="{Loc nsv-sector-monitor-title}"
+               SetSize="1100 500">
+    <BoxContainer Orientation="Vertical" Margin="8">
+        <BoxContainer Orientation="Horizontal" Margin="0 0 0 4">
+            <Label Name="TotalSectorCapacity"
+                   Access="Public"
+                   Margin="0 0 16 0" />
+            <Label Name="ActiveSectorCapacity"
+                   Access="Public" />
+        </BoxContainer>
+        <Label Text="{Loc nsv-sector-monitor-capacity-note}"
+               StyleClasses="LabelSubText"
+               Margin="0 0 0 8" />
+        <Button Name="RefreshButton"
+                Access="Public"
+                Text="{Loc nsv-sector-monitor-refresh}"
+                HorizontalAlignment="Right"
+                Margin="0 0 0 8" />
+        <ScrollContainer VerticalExpand="True" HorizontalExpand="True">
+            <GridContainer Name="Rows"
+                           Access="Public"
+                           Columns="9"
+                           HorizontalExpand="True" />
+        </ScrollContainer>
+    </BoxContainer>
+</DefaultWindow>
