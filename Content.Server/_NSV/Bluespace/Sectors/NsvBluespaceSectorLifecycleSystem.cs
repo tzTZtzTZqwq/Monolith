@@ -557,38 +557,43 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
 
     private void OnPlayerStatusChanged(object? sender, SessionStatusEventArgs args)
     {
-        if (args.NewStatus == SessionStatus.InGame)
+        HandlePlayerStatusChanged(args.Session, args.NewStatus);
+    }
+
+    internal void HandlePlayerStatusChanged(ICommonSession session, SessionStatus newStatus)
+    {
+        if (newStatus == SessionStatus.InGame)
         {
-            _disconnectedCharacters.Remove(args.Session.UserId);
-            if (args.Session.AttachedEntity is { } entity && IsBlockingLivingCharacter(entity))
+            _disconnectedCharacters.Remove(session.UserId);
+            if (session.AttachedEntity is { } entity && IsActiveGameplayCharacter(entity))
                 TryWakeForEntity(entity, NsvBluespaceSectorWakeReason.PlayerReconnect);
             return;
         }
 
-        if (args.NewStatus != SessionStatus.Disconnected)
+        if (newStatus != SessionStatus.Disconnected)
             return;
 
-        if (args.Session.AttachedEntity is { } disconnectedEntity && IsBlockingLivingCharacter(disconnectedEntity))
+        if (session.AttachedEntity is { } disconnectedEntity && IsActiveGameplayCharacter(disconnectedEntity))
         {
-            _disconnectedCharacters[args.Session.UserId] = new DisconnectedLivingCharacter(
+            _disconnectedCharacters[session.UserId] = new DisconnectedLivingCharacter(
                 disconnectedEntity,
                 _timing.CurTime);
         }
         else
         {
-            _disconnectedCharacters.Remove(args.Session.UserId);
+            _disconnectedCharacters.Remove(session.UserId);
         }
     }
 
     private void OnPlayerAttached(PlayerAttachedEvent args)
     {
-        if (IsBlockingLivingCharacter(args.Entity))
+        if (IsActiveGameplayCharacter(args.Entity))
             TryWakeForEntity(args.Entity, NsvBluespaceSectorWakeReason.PlayerReconnect);
     }
 
     private void OnActorParentChanged(Entity<ActorComponent> ent, ref EntParentChangedMessage args)
     {
-        if (IsBlockingLivingCharacter(ent.Owner))
+        if (IsActiveGameplayCharacter(ent.Owner))
             TryWakeForEntity(ent.Owner, NsvBluespaceSectorWakeReason.EntityTransfer);
     }
 
@@ -616,7 +621,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
 
             _disconnectedCharacters.Remove(session.UserId);
             if (session.AttachedEntity is not { } entity ||
-                !IsBlockingLivingCharacter(entity) ||
+                !IsActiveGameplayCharacter(entity) ||
                 !TryGetSectorAggregation(entity, aggregations, out var aggregation))
             {
                 continue;
@@ -632,7 +637,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         foreach (var (userId, disconnected) in _disconnectedCharacters.ToArray())
         {
             if (!IsWithinDisconnectedPlayerGrace(disconnected.DisconnectedAt, now) ||
-                !IsBlockingLivingCharacter(disconnected.Entity))
+                !IsActiveGameplayCharacter(disconnected.Entity))
             {
                 _disconnectedCharacters.Remove(userId);
                 continue;
@@ -693,7 +698,12 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         return false;
     }
 
-    private bool IsBlockingLivingCharacter(EntityUid entity)
+    /// <summary>
+    /// Returns whether this entity is a physically present gameplay character whose simulation must remain active.
+    /// Ghosts never qualify, including interactive admin observers. Entities without a mob state, such as preview
+    /// observers, also do not qualify. Remote view subscriptions and eye targets are intentionally not considered.
+    /// </summary>
+    private bool IsActiveGameplayCharacter(EntityUid entity)
     {
         return !TerminatingOrDeleted(entity) &&
                !HasComp<GhostComponent>(entity) &&

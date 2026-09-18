@@ -79,6 +79,7 @@ _map.SetPaused(mapId, false);
 6. 冻结前重新计算权威状态，pause 同步回调后再次验证。
 7. sleep/wake 保留同一 map 和实体实例，不重新运行模板，也不增加 `InstanceGeneration`。
 8. 普通空置只能休眠，不能调用最终销毁。
+9. 只读观察永不因观察本身 wake/unpause；观察者可以查看 paused sector 的冻结状态，但不属于实时模拟参与者。
 
 ## 生命周期状态机
 
@@ -165,13 +166,14 @@ Sleeping:
 | 昏迷、倒地但仍存活 | 是 |
 | 跨地图远程控制本地图内存活单位 | 是 |
 | 已死亡，尸体留在地图 | 否 |
-| 旁观幽灵、管理员相机、只读 remote eye | 默认否 |
+| 普通幽灵、`AdminObserver`、`ReplayObserver`、`PreviewObserver` | 否；永不因附着、移动、跟随、传送或重连本身唤醒 |
+| 管理员/监控相机、只读 `ViewSubscriptions`、remote eye | 否；只观察 paused sector 的冻结状态 |
 | 掉线但角色仍存活 | 仅在 `DisconnectedPlayerGrace` 内 |
 | 正在抵达本地图 | 由 arrival reservation 阻止 |
 
-当前实现按 `NetUserId` 去重，`Alive` 和 `Critical` 计入，dead、ghost 和无 `MobStateComponent` 的实体不计入。断线时保存受控实体和时间，30 秒宽限期比较集中在单一函数中；每轮扫描重新检查该实体当前的生命状态和 `Transform.MapUid`。
+当前实现按 `NetUserId` 去重，只有 session attached、物理位于该 sector、非 ghost 且生命状态为 `Alive` 或 `Critical` 的真实游戏角色计入。dead、带 `GhostComponent` 的普通/管理员/回放观察者，以及无 qualifying `MobStateComponent` 的 `PreviewObserver` 均不计入；`AdminObserver.CanGhostInteract` 和 `Physics.IgnorePaused` 不会把观察者变成生命周期 blocker。断线时保存受控实体和时间，30 秒宽限期比较集中在单一函数中；每轮扫描重新检查该实体当前的生命状态和 `Transform.MapUid`。
 
-只读 `ViewSubscriptions` 不直接计入玩家数。确实需要地图继续运行的管理工具或任务必须注册专用 must-run blocker。
+只读 `ViewSubscriptions` 与 `EyeComponent.Target` 不改变受控角色的物理 sector，也不直接计入玩家数。管理员相机、监控相机、remote eye 和其他订阅视角可以查看 paused sector，但看到的是冻结 ECS/PVS 状态，订阅本身不得调用 wake。确实需要地图继续运行的管理工具或任务必须注册专用 must-run blocker 或通过合法调用方显式请求 `RequestWake()`。
 
 ## 休眠前时间计算
 
@@ -251,7 +253,7 @@ Sleeping 的恢复顺序：
 
 解冻由接口立即触发，不等待下一次周期扫描。状态事件只通知转换进度，不能成为第二套 pause/unpause 执行路径。当前 P4 的 map pause API 为同步调用，因此 `Waking` 通常只在同一调用栈内短暂存在；重入请求会合并到当前 wake owner，不会重复 unpause。
 
-FTL 会以 shuttle 为 requester 请求 `Arrival` wake；只有目标同步提交 `Ready` 后才取得 arrival reservation、写入 travel 数据并启动真实迁移。失败或取消时必须释放预留。玩家重新附着/重连和存活 `ActorComponent` 的跨 map parent change 会立即请求 wake，周期扫描仍负责漏事件 reconciliation。
+FTL 会以 shuttle 为 requester 请求 `Arrival` wake；只有目标同步提交 `Ready` 后才取得 arrival reservation、写入 travel 数据并启动真实迁移。失败或取消时必须释放预留。玩家重新附着/重连和存活 `ActorComponent` 的跨 map parent change 会立即请求 wake，周期扫描仍负责漏事件 reconciliation。管理员驱动真实 `Alive`/`Critical` 角色进入 sector 同样遵守该门禁；aghost 的移动、跟随、传送以及相机/remote-eye 订阅不代表真实角色进入，因此不得 wake。
 
 ## 保留、时间与销毁
 
@@ -278,7 +280,10 @@ FTL 会以 shuttle 为 requester 请求 `Arrival` wake；只有目标同步提�
 
 - registry 扫描能发现 Ready、PreparingSleep 和 Sleeping sector；
 - 多玩家只离开一部分时不进入准备；
-- 昏迷玩家阻止休眠，尸体和旁观幽灵默认不阻止；
+- 昏迷玩家阻止休眠，尸体和所有只读观察者不阻止；
+- `MobObserver`、`AdminObserver`、`ReplayObserver`、`PreviewObserver` 的附着、重连和跨 map 移动不会唤醒 Sleeping sector；
+- 管理员相机/direct view subscription 和 remote-eye target 可建立观察，但 sector 保持 paused；
+- 真实 `Alive`/`Critical` 角色的附着或物理进入仍立即唤醒；
 - 断线宽限期、重连、复活、换角色和远程控制正确更新计数；
 - 漏失事件后，周期扫描能从权威状态修正结果。
 

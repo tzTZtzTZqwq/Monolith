@@ -18,6 +18,7 @@ using Content.Shared.Mobs.Systems;
 using Content.Shared.Shuttles.Components;
 using Robust.Server.GameObjects;
 using Robust.Shared.Containers;
+using Robust.Shared.Enums;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -530,8 +531,9 @@ public sealed class NsvBluespaceSectorSystemTest
         await pair.CleanReturnAsync();
     }
 
-    [Test]
-    public async Task AttachingLivingPlayerWakesSleepingSectorImmediately()
+    [TestCase(MobState.Alive)]
+    [TestCase(MobState.Critical)]
+    public async Task AttachingLivingPlayerWakesSleepingSectorImmediately(MobState state)
     {
         await using var pair = await PoolManager.GetServerClient(new PoolSettings
         {
@@ -542,6 +544,7 @@ public sealed class NsvBluespaceSectorSystemTest
         var entityManager = server.ResolveDependency<IEntityManager>();
         var lifecycle = entityManager.System<NsvBluespaceSectorLifecycleSystem>();
         var map = entityManager.System<MapSystem>();
+        var mobState = entityManager.System<MobStateSystem>();
         var sectors = entityManager.System<NsvBluespaceSectorSystem>();
         var session = server.PlayerMan.Sessions.Single();
         var originalAttached = session.AttachedEntity;
@@ -561,6 +564,8 @@ public sealed class NsvBluespaceSectorSystemTest
 
             playerUid = entityManager.SpawnEntity(null, new EntityCoordinates(mapUid, Vector2.Zero));
             entityManager.AddComponent<MobStateComponent>(playerUid);
+            mobState.ChangeMobState(playerUid, state);
+            Assert.That(entityManager.HasComponent<GhostComponent>(playerUid), Is.False);
             server.PlayerMan.SetAttachedEntity(session, playerUid);
 
             Assert.Multiple(() =>
@@ -577,6 +582,309 @@ public sealed class NsvBluespaceSectorSystemTest
 
         await server.WaitRunTicks(1);
         await server.WaitAssertion(() => Assert.That(entityManager.EntityExists(mapUid), Is.False));
+        await pair.CleanReturnAsync();
+    }
+
+    [TestCase("MobObserver", true)]
+    [TestCase("AdminObserver", true)]
+    [TestCase("ReplayObserver", true)]
+    [TestCase("PreviewObserver", false)]
+    public async Task AttachedReadOnlyObserverPrototypesDoNotWakeSleepingSector(string prototype, bool hasGhost)
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Connected = true,
+            Dirty = true,
+        });
+        var server = pair.Server;
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var lifecycle = entityManager.System<NsvBluespaceSectorLifecycleSystem>();
+        var map = entityManager.System<MapSystem>();
+        var sectors = entityManager.System<NsvBluespaceSectorSystem>();
+        var transform = entityManager.System<SharedTransformSystem>();
+        var observerSession = server.PlayerMan.Sessions.Single();
+        var originalAttached = observerSession.AttachedEntity;
+        var mapUid = EntityUid.Invalid;
+        var observerUid = EntityUid.Invalid;
+        var stagingMapUid = EntityUid.Invalid;
+        MapId stagingMapId = default;
+        uint sleepingEpoch = 0;
+
+        await server.WaitPost(() =>
+        {
+            Assert.That(
+                sectors.TryGetOrCreate("NSVBluespaceTestSector", 681, out mapUid, out var failure),
+                Is.True,
+                failure);
+            stagingMapUid = map.CreateMap(out stagingMapId, false);
+            var instance = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(mapUid);
+            lifecycle.RefreshRegistry();
+            Assert.That(lifecycle.TryCommitSleep(mapUid), Is.True);
+            sleepingEpoch = instance.TransitionEpoch;
+
+            observerUid = entityManager.SpawnEntity(prototype, new EntityCoordinates(mapUid, Vector2.Zero));
+            Assert.That(entityManager.HasComponent<GhostComponent>(observerUid), Is.EqualTo(hasGhost));
+            if (prototype == "AdminObserver")
+                Assert.That(entityManager.GetComponent<GhostComponent>(observerUid).CanGhostInteract, Is.True);
+            if (prototype == "PreviewObserver")
+                Assert.That(entityManager.HasComponent<MobStateComponent>(observerUid), Is.False);
+
+            server.PlayerMan.SetAttachedEntity(observerSession, observerUid);
+            Assert.Multiple(() =>
+            {
+                Assert.That(observerSession.AttachedEntity, Is.EqualTo(observerUid));
+                Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Sleeping));
+                Assert.That(map.IsPaused(instance.MapId), Is.True);
+                Assert.That(instance.TransitionEpoch, Is.EqualTo(sleepingEpoch));
+            });
+
+            lifecycle.RefreshRegistry();
+            Assert.That(lifecycle.TryGetRegistryEntry(mapUid, out var observed), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(observed.ActiveLivingPlayers, Is.Zero);
+                Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Sleeping));
+                Assert.That(map.IsPaused(instance.MapId), Is.True);
+                Assert.That(instance.TransitionEpoch, Is.EqualTo(sleepingEpoch));
+            });
+
+            transform.SetCoordinates(observerUid, new EntityCoordinates(stagingMapUid, Vector2.Zero));
+            transform.SetCoordinates(observerUid, new EntityCoordinates(mapUid, Vector2.One));
+            Assert.Multiple(() =>
+            {
+                Assert.That(entityManager.GetComponent<TransformComponent>(observerUid).MapUid, Is.EqualTo(mapUid));
+                Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Sleeping));
+                Assert.That(map.IsPaused(instance.MapId), Is.True);
+                Assert.That(instance.TransitionEpoch, Is.EqualTo(sleepingEpoch));
+            });
+
+            if (prototype is "MobObserver" or "AdminObserver")
+            {
+                lifecycle.HandlePlayerStatusChanged(observerSession, SessionStatus.Disconnected);
+                lifecycle.HandlePlayerStatusChanged(observerSession, SessionStatus.InGame);
+                lifecycle.RefreshRegistry();
+                Assert.That(lifecycle.TryGetRegistryEntry(mapUid, out var reconnected), Is.True);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(observerSession.AttachedEntity, Is.EqualTo(observerUid));
+                    Assert.That(reconnected.ActiveLivingPlayers, Is.Zero);
+                    Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Sleeping));
+                    Assert.That(map.IsPaused(instance.MapId), Is.True);
+                    Assert.That(instance.TransitionEpoch, Is.EqualTo(sleepingEpoch));
+                });
+            }
+        });
+
+        await server.WaitPost(() =>
+        {
+            server.PlayerMan.SetAttachedEntity(observerSession, originalAttached);
+            entityManager.DeleteEntity(observerUid);
+            var instance = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(mapUid);
+            Assert.That(sectors.TryDispose((mapUid, instance)), Is.True);
+            map.DeleteMap(stagingMapId);
+        });
+
+        await server.WaitRunTicks(1);
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(entityManager.EntityExists(mapUid), Is.False);
+            Assert.That(entityManager.EntityExists(stagingMapUid), Is.False);
+        });
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task AdminCameraViewSubscriptionDoesNotWakeSleepingSector()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Connected = true,
+            Dirty = true,
+        });
+        var server = pair.Server;
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var lifecycle = entityManager.System<NsvBluespaceSectorLifecycleSystem>();
+        var map = entityManager.System<MapSystem>();
+        var sectors = entityManager.System<NsvBluespaceSectorSystem>();
+        var views = entityManager.System<ViewSubscriberSystem>();
+        var session = server.PlayerMan.Sessions.Single();
+        var mapUid = EntityUid.Invalid;
+        var cameraUid = EntityUid.Invalid;
+
+        await server.WaitPost(() =>
+        {
+            Assert.That(
+                sectors.TryGetOrCreate("NSVBluespaceTestSector", 682, out mapUid, out var failure),
+                Is.True,
+                failure);
+            var instance = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(mapUid);
+            lifecycle.RefreshRegistry();
+            Assert.That(lifecycle.TryCommitSleep(mapUid), Is.True);
+            var sleepingEpoch = instance.TransitionEpoch;
+
+            cameraUid = entityManager.SpawnEntity("AdminCamera", new EntityCoordinates(mapUid, Vector2.Zero));
+            views.AddViewSubscriber(cameraUid, session);
+            Assert.That(session.ViewSubscriptions, Does.Contain(cameraUid));
+
+            lifecycle.RefreshRegistry();
+            Assert.That(lifecycle.TryGetRegistryEntry(mapUid, out var observed), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(observed.ActiveLivingPlayers, Is.Zero);
+                Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Sleeping));
+                Assert.That(map.IsPaused(instance.MapId), Is.True);
+                Assert.That(instance.TransitionEpoch, Is.EqualTo(sleepingEpoch));
+            });
+
+            views.RemoveViewSubscriber(cameraUid, session);
+            Assert.That(session.ViewSubscriptions, Does.Not.Contain(cameraUid));
+            entityManager.DeleteEntity(cameraUid);
+            Assert.That(sectors.TryDispose((mapUid, instance)), Is.True);
+        });
+
+        await server.WaitRunTicks(1);
+        await server.WaitAssertion(() => Assert.That(entityManager.EntityExists(mapUid), Is.False));
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task RemoteEyeTargetDoesNotWakeSleepingSector()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Connected = true,
+            Dirty = true,
+        });
+        var server = pair.Server;
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var eye = entityManager.System<EyeSystem>();
+        var lifecycle = entityManager.System<NsvBluespaceSectorLifecycleSystem>();
+        var map = entityManager.System<MapSystem>();
+        var sectors = entityManager.System<NsvBluespaceSectorSystem>();
+        var session = server.PlayerMan.Sessions.Single();
+        var originalAttached = session.AttachedEntity;
+        var mapUid = EntityUid.Invalid;
+        var playerUid = EntityUid.Invalid;
+        var targetUid = EntityUid.Invalid;
+        var stagingMapUid = EntityUid.Invalid;
+        MapId stagingMapId = default;
+
+        await server.WaitPost(() =>
+        {
+            Assert.That(
+                sectors.TryGetOrCreate("NSVBluespaceTestSector", 683, out mapUid, out var failure),
+                Is.True,
+                failure);
+            stagingMapUid = map.CreateMap(out stagingMapId, false);
+            var instance = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(mapUid);
+            lifecycle.RefreshRegistry();
+            Assert.That(lifecycle.TryCommitSleep(mapUid), Is.True);
+            var sleepingEpoch = instance.TransitionEpoch;
+
+            playerUid = entityManager.SpawnEntity(null, new EntityCoordinates(stagingMapUid, Vector2.Zero));
+            entityManager.AddComponent<MobStateComponent>(playerUid);
+            entityManager.AddComponent<EyeComponent>(playerUid);
+            server.PlayerMan.SetAttachedEntity(session, playerUid);
+            targetUid = entityManager.SpawnEntity(null, new EntityCoordinates(mapUid, Vector2.Zero));
+
+            eye.SetTarget(playerUid, targetUid);
+            Assert.Multiple(() =>
+            {
+                Assert.That(entityManager.GetComponent<EyeComponent>(playerUid).Target, Is.EqualTo(targetUid));
+                Assert.That(session.ViewSubscriptions, Does.Contain(targetUid));
+                Assert.That(entityManager.GetComponent<TransformComponent>(playerUid).MapUid, Is.EqualTo(stagingMapUid));
+            });
+
+            lifecycle.RefreshRegistry();
+            Assert.That(lifecycle.TryGetRegistryEntry(mapUid, out var observed), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(observed.ActiveLivingPlayers, Is.Zero);
+                Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Sleeping));
+                Assert.That(map.IsPaused(instance.MapId), Is.True);
+                Assert.That(instance.TransitionEpoch, Is.EqualTo(sleepingEpoch));
+            });
+
+            eye.SetTarget(playerUid, null);
+            Assert.That(session.ViewSubscriptions, Does.Not.Contain(targetUid));
+            server.PlayerMan.SetAttachedEntity(session, originalAttached);
+            entityManager.DeleteEntity(playerUid);
+            entityManager.DeleteEntity(targetUid);
+            Assert.That(sectors.TryDispose((mapUid, instance)), Is.True);
+            map.DeleteMap(stagingMapId);
+        });
+
+        await server.WaitRunTicks(1);
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(entityManager.EntityExists(mapUid), Is.False);
+            Assert.That(entityManager.EntityExists(stagingMapUid), Is.False);
+        });
+        await pair.CleanReturnAsync();
+    }
+
+    [TestCase(MobState.Alive)]
+    [TestCase(MobState.Critical)]
+    public async Task MovingAttachedLivingPlayerIntoSleepingSectorWakesImmediately(MobState state)
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Connected = true,
+            Dirty = true,
+        });
+        var server = pair.Server;
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var lifecycle = entityManager.System<NsvBluespaceSectorLifecycleSystem>();
+        var map = entityManager.System<MapSystem>();
+        var mobState = entityManager.System<MobStateSystem>();
+        var sectors = entityManager.System<NsvBluespaceSectorSystem>();
+        var transform = entityManager.System<SharedTransformSystem>();
+        var session = server.PlayerMan.Sessions.Single();
+        var originalAttached = session.AttachedEntity;
+        var mapUid = EntityUid.Invalid;
+        var playerUid = EntityUid.Invalid;
+        var stagingMapUid = EntityUid.Invalid;
+        MapId stagingMapId = default;
+
+        await server.WaitPost(() =>
+        {
+            Assert.That(
+                sectors.TryGetOrCreate("NSVBluespaceTestSector", 684, out mapUid, out var failure),
+                Is.True,
+                failure);
+            stagingMapUid = map.CreateMap(out stagingMapId, false);
+            var instance = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(mapUid);
+            lifecycle.RefreshRegistry();
+            Assert.That(lifecycle.TryCommitSleep(mapUid), Is.True);
+            var sleepingEpoch = instance.TransitionEpoch;
+
+            playerUid = entityManager.SpawnEntity(null, new EntityCoordinates(stagingMapUid, Vector2.Zero));
+            entityManager.AddComponent<MobStateComponent>(playerUid);
+            mobState.ChangeMobState(playerUid, state);
+            Assert.That(entityManager.HasComponent<GhostComponent>(playerUid), Is.False);
+            server.PlayerMan.SetAttachedEntity(session, playerUid);
+            Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Sleeping));
+
+            transform.SetCoordinates(playerUid, new EntityCoordinates(mapUid, Vector2.Zero));
+            Assert.Multiple(() =>
+            {
+                Assert.That(instance.State, Is.EqualTo(NsvBluespaceSectorState.Ready));
+                Assert.That(instance.TransitionEpoch, Is.GreaterThan(sleepingEpoch));
+                Assert.That(map.IsPaused(instance.MapId), Is.False);
+            });
+
+            server.PlayerMan.SetAttachedEntity(session, originalAttached);
+            entityManager.DeleteEntity(playerUid);
+            Assert.That(sectors.TryDispose((mapUid, instance)), Is.True);
+            map.DeleteMap(stagingMapId);
+        });
+
+        await server.WaitRunTicks(1);
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(entityManager.EntityExists(mapUid), Is.False);
+            Assert.That(entityManager.EntityExists(stagingMapUid), Is.False);
+        });
         await pair.CleanReturnAsync();
     }
 
