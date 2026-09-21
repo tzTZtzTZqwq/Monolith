@@ -16,6 +16,10 @@ public sealed class NsvSectorMonitorEui : BaseEui
         _window = new NsvSectorMonitorWindow();
         _window.OnClose += () => SendMessage(new CloseEuiMessage());
         _window.RefreshButton.OnPressed += _ => RequestRefresh();
+        _window.OnSpawnFleet += nodeId =>
+            SendMessage(new SpawnDataFleetRequest(_window.StarmapId, nodeId));
+        _window.OnMoveFleet += (shipId, nodeId) =>
+            SendMessage(new MoveFleetRequest(shipId, _window.StarmapId, nodeId));
     }
 
     public override void HandleState(EuiStateBase state)
