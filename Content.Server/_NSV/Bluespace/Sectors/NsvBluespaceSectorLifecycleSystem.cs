@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Numerics;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared.Ghost;
 using Content.Shared.Mobs;
@@ -55,6 +56,7 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
     [Dependency] private MapSystem _map = default!;
     [Dependency] private IPlayerManager _players = default!;
     [Dependency] private IGameTiming _timing = default!;
+    [Dependency] private Strategy.NsvFleetRegistrySystem _fleets = default!;
 
     private readonly Dictionary<NetUserId, DisconnectedLivingCharacter> _disconnectedCharacters = new();
     private readonly Dictionary<EntityUid, HashSet<EntityUid>> _mustRunTaskBlockers = new();
@@ -380,6 +382,11 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
             }
 
             SetLifecycleState(mapUid, sector, NsvBluespaceSectorState.Sleeping);
+
+            // Sector is committed asleep and its map is paused: batch-serialize the marked
+            // ships resident here onto the (also paused) holding map. Parking there never
+            // triggers a wake, so this stays inside the sleep transition.
+            _fleets.SerializeSectorFleets(new Strategy.NsvFleetNodeKey(sector.StarmapId, sector.NodeId), out _);
             return true;
         }
         finally
@@ -413,6 +420,15 @@ public sealed partial class NsvBluespaceSectorLifecycleSystem : EntitySystem
         SetLifecycleState(mapUid, sector, NsvBluespaceSectorState.Waking);
         try
         {
+            // Wake regeneration gate: while still paused, instantiate the ships whose data
+            // node is this sector. Ships that travelled away carry a different DataNode and
+            // are not resident here, so they are not regenerated. Runs before unpause so the
+            // grids are back before the map simulates.
+            _fleets.InstantiateNodeFleets(
+                new Strategy.NsvFleetNodeKey(sector.StarmapId, sector.NodeId),
+                new EntityCoordinates(mapUid, Vector2.Zero),
+                out _);
+
             if (_map.IsPaused(sector.MapId))
                 _map.SetPaused(sector.MapId, false);
 

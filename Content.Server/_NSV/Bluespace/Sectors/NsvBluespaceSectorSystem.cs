@@ -1,6 +1,7 @@
 using System.Linq;
 using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server._NSV.Bluespace.Sectors.Generators;
+using Content.Server._NSV.Bluespace.Strategy;
 using Content.Server._NSV.NPC;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared._NSV.Bluespace.Starmap;
@@ -16,6 +17,7 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
     [Dependency] private MapSystem _map = default!;
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
+    [Dependency] private NsvFleetRegistrySystem _fleets = default!;
     [Dependency] private NsvBluespaceSectorLifecycleSystem _lifecycle = default!;
     [Dependency] private IMapManager _mapManager = default!;
     [Dependency] private MapLoaderSystem _mapLoader = default!;
@@ -290,6 +292,7 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
             NsvBluespaceShipGeneratorDefinition ship => _shipGenerator.TryGenerate(
                 _prototype,
                 _factions,
+                _fleets,
                 _mapLoader,
                 mapId,
                 instance,

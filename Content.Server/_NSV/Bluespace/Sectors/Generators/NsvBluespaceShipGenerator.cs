@@ -1,3 +1,4 @@
+using Content.Server._NSV.Bluespace.Strategy;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.GameObjects;
@@ -11,6 +12,7 @@ public sealed class NsvBluespaceShipGenerator
     public bool TryGenerate(
         IPrototypeManager prototypes,
         NsvBluespaceFactionSystem factions,
+        NsvFleetRegistrySystem fleets,
         MapLoaderSystem mapLoader,
         MapId mapId,
         NsvBluespaceSectorInstanceComponent instance,
@@ -39,6 +41,9 @@ public sealed class NsvBluespaceShipGenerator
         }
 
         instance.OwnedGrids.Add(rootGrid);
+
+        // born-bound: bind identity the moment the grid spawns, resident at this sector's node.
+        fleets.RegisterShip(rootGrid, definition.GridPath, new NsvFleetNodeKey(instance.StarmapId, instance.NodeId));
         return true;
     }
 }
