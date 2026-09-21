@@ -571,6 +571,61 @@ public sealed class NsvFleetRegistrySystemTest
         await pair.CleanReturnAsync();
     }
 
+    [Test]
+    public async Task InstantiatedFleetFansOutToFreeSpots()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var mapSystem = entityManager.System<SharedMapSystem>();
+        var transform = entityManager.System<SharedTransformSystem>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            var node = new NsvFleetNodeKey("test-starmap", "crowded");
+
+            // Two tiled grids so the placement search can actually see them (empty grids have a
+            // degenerate AABB the spatial query ignores).
+            var firstEnt = mapManager.CreateGridEntity(testMap.MapId);
+            var secondEnt = mapManager.CreateGridEntity(testMap.MapId);
+            foreach (var ent in new[] { firstEnt, secondEnt })
+            {
+                ent.Comp.CanSplit = false;
+                for (var x = 0; x < 3; x++)
+                    for (var y = 0; y < 3; y++)
+                        mapSystem.SetTile(ent, new Vector2i(x, y), new Tile(1));
+            }
+
+            var first = fleets.RegisterShip(firstEnt.Owner, new ResPath("/Maps/_NSV/a.yml"), node);
+            var second = fleets.RegisterShip(secondEnt.Owner, new ResPath("/Maps/_NSV/b.yml"), node);
+
+            fleets.SerializeSectorFleets(node, out var serializeFailures);
+            Assert.That(serializeFailures, Is.Empty);
+
+            // Both ships get the SAME anchor; the free-spot search must keep them from stacking.
+            var anchor = new EntityCoordinates(mapSystem.GetMap(testMap.MapId), new Vector2(10f, 10f));
+            fleets.InstantiateNodeFleets(node, anchor, out var instantiateFailures);
+            Assert.That(instantiateFailures, Is.Empty);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(first.State, Is.EqualTo(NsvFleetShipState.Live));
+                Assert.That(second.State, Is.EqualTo(NsvFleetShipState.Live));
+                Assert.That(entityManager.GetComponent<TransformComponent>(firstEnt.Owner).MapID, Is.EqualTo(testMap.MapId));
+                Assert.That(entityManager.GetComponent<TransformComponent>(secondEnt.Owner).MapID, Is.EqualTo(testMap.MapId));
+            });
+
+            var firstBox = firstEnt.Comp.LocalAABB.Translated(transform.GetWorldPosition(firstEnt.Owner));
+            var secondBox = secondEnt.Comp.LocalAABB.Translated(transform.GetWorldPosition(secondEnt.Owner));
+            Assert.That(firstBox.Intersects(secondBox), Is.False, "instantiated ships must not overlap");
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
     private static int CountGridFloors(IEntityManager entityManager, SharedMapSystem mapSystem, EntityUid gridUid)
     {
         var grid = entityManager.GetComponent<MapGridComponent>(gridUid);

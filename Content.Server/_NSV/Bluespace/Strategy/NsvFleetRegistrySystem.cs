@@ -24,6 +24,13 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
     [Dependency] private MapSystem _map = default!;
     [Dependency] private SharedTransformSystem _transform = default!;
     [Dependency] private DockingSystem _docking = default!;
+    [Dependency] private IMapManager _mapManager = default!;
+
+    // Instantiate placement search: expanding ring of candidate spots around the caller's
+    // anchor so waking fleets fan out instead of stacking on (0,0) and on the station.
+    private const float FreeSpotClearance = 2f;
+    private const int FreeSpotMaxRings = 32;
+    private const int FreeSpotDirections = 8;
 
     private readonly NsvFleetIdAllocator _allocator = new();
     private readonly Dictionary<string, NsvFleetShip> _ships = new();
@@ -301,8 +308,9 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
     /// from the holding map onto <paramref name="destination"/> (which unpauses it), applies
     /// the data-state integrity by deleting floors down to <see cref="NsvFleetShip.DataTargetFloorCount"/>
     /// (comparator order, idempotent — replaying converges), and flips the record to Live.
-    /// The caller chooses the destination map and coordinates; residency/node selection is
-    /// out of scope here.
+    /// The caller supplies <paramref name="destination"/> as a preferred anchor; the ship lands
+    /// on the nearest clear spot found by an outward ring search from there, so a batch of
+    /// waking ships fans out instead of stacking. Residency/node selection is out of scope here.
     /// </summary>
     public bool TryInstantiateShip(string shipId, EntityCoordinates destination, out string? failure)
     {
@@ -322,13 +330,71 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
         if (!GridIsBound(ship, out failure))
             return false;
 
-        _transform.SetCoordinates(ship.RootGrid, destination);
+        _transform.SetCoordinates(ship.RootGrid, FindFreeSpot(ship.RootGrid, destination));
         ship.State = NsvFleetShipState.Live;
 
         // Apply data-state damage taken while parked. Target-based and idempotent: a retry
         // converges to the same grid rather than damaging further.
         if (ship.DataTargetFloorCount >= 0)
             TrySetFloorCount(shipId, ship.DataTargetFloorCount, out _);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Treats <paramref name="preferred"/> as an anchor and searches outward on a deterministic
+    /// ring pattern for a position where the grid's footprint clears every other grid on the
+    /// destination map, so instantiated ships fan out instead of stacking on the anchor (and on
+    /// the station sitting there). Deterministic — no RNG — so replaying a wake converges to the
+    /// same layout. Falls back to the anchor when the grid is empty or nothing clear is found.
+    /// </summary>
+    private EntityCoordinates FindFreeSpot(EntityUid gridUid, EntityCoordinates preferred)
+    {
+        if (!TryComp<MapGridComponent>(gridUid, out var grid))
+            return preferred;
+
+        var localAabb = grid.LocalAABB;
+        // An empty grid has a degenerate AABB the spatial query can't detect; leave it as-is.
+        if (localAabb.Width <= 0f || localAabb.Height <= 0f)
+            return preferred;
+
+        var mapCoords = _transform.ToMapCoordinates(preferred);
+        if (mapCoords.MapId == MapId.Nullspace)
+            return preferred;
+
+        var anchor = mapCoords.Position;
+        if (IsSpotClear(gridUid, mapCoords.MapId, localAabb.Translated(anchor)))
+            return preferred;
+
+        var step = MathF.Max(localAabb.Width, localAabb.Height) + FreeSpotClearance * 2f;
+        for (var ring = 1; ring <= FreeSpotMaxRings; ring++)
+        {
+            for (var dir = 0; dir < FreeSpotDirections; dir++)
+            {
+                var angle = dir * (MathF.PI * 2f / FreeSpotDirections);
+                var candidate = anchor + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * (ring * step);
+                if (IsSpotClear(gridUid, mapCoords.MapId, localAabb.Translated(candidate)))
+                    return new EntityCoordinates(_map.GetMap(mapCoords.MapId), candidate);
+            }
+        }
+
+        return preferred;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="worldBox"/> (a candidate grid footprint) is free of every grid on
+    /// the map except the ship's own. The map entity is excluded so an otherwise-empty destination
+    /// reads as clear.
+    /// </summary>
+    private bool IsSpotClear(EntityUid gridUid, MapId mapId, Box2 worldBox)
+    {
+        var grids = new List<Entity<MapGridComponent>>();
+        _mapManager.FindGridsIntersecting(mapId, worldBox.Enlarged(FreeSpotClearance), ref grids, includeMap: false);
+        foreach (var other in grids)
+        {
+            if (other.Owner != gridUid)
+                return false;
+        }
 
         return true;
     }
