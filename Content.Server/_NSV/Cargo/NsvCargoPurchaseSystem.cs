@@ -96,15 +96,13 @@ public sealed class NsvCargoPurchaseSystem : EntitySystem
         if (args.Actor is not { Valid: true } actor)
             return;
 
-        var failure = _market.ValidateConsoleRequest(actor, uid);
-        if (failure != NsvCargoFailure.None)
+        if (!_market.TryValidateAndResolve(actor, uid, out var context, out var failure))
         {
             Reject(uid, actor, failure);
             return;
         }
 
-        if (!_market.TryResolveContext(uid, out var context, out failure) ||
-            context.Market is not { } market || market.Buy is not { } buy)
+        if (context.Market is not { } market || market.Buy is not { })
         {
             Reject(uid, actor, NsvCargoFailure.MarketUnavailable);
             return;
@@ -170,15 +168,13 @@ public sealed class NsvCargoPurchaseSystem : EntitySystem
         if (args.Actor is not { Valid: true } actor)
             return;
 
-        var failure = _market.ValidateConsoleRequest(actor, uid);
-        if (failure != NsvCargoFailure.None)
+        if (!_market.TryValidateAndResolve(actor, uid, out var context, out var failure))
         {
             Reject(uid, actor, failure);
             return;
         }
 
-        if (!_market.TryResolveContext(uid, out var context, out failure) ||
-            context.Market is not { } market || market.Buy is not { } buy)
+        if (context.Market is not { } market || market.Buy is not { })
         {
             Reject(uid, actor, NsvCargoFailure.MarketUnavailable);
             return;
@@ -331,7 +327,6 @@ public sealed class NsvCargoPurchaseSystem : EntitySystem
         CrateMachineComponent crateMachine,
         NsvCargoDeliveryComponent delivery)
     {
-        delivery.HubUid = context.HubUid;
         delivery.ActorUid = actor;
         delivery.ConsoleUid = consoleUid;
         delivery.GridUid = context.GridUid;
@@ -448,8 +443,8 @@ public sealed class NsvCargoPurchaseSystem : EntitySystem
         var amount = comp.Amount;
         comp.Amount = 0;
 
-        if (comp.HubUid is { Valid: true } hubUid &&
-            TryComp<NsvCargoHubComponent>(hubUid, out var hub) &&
+        if (comp.GridUid is { Valid: true } gridUid &&
+            TryComp<NsvCargoHubComponent>(gridUid, out var hub) &&
             _market.TryRefund(hub, amount, out var failure))
         {
             _market.LogCargoAction(NsvCargoLogAction.Refund, comp.ActorUid, comp.ConsoleUid, null, 0, amount, failure);
@@ -560,7 +555,6 @@ public sealed class NsvCargoPurchaseSystem : EntitySystem
     private void ResetDelivery(NsvCargoDeliveryComponent delivery)
     {
         delivery.State = NsvCargoDeliveryState.Idle;
-        delivery.HubUid = EntityUid.Invalid;
         delivery.ActorUid = EntityUid.Invalid;
         delivery.ConsoleUid = EntityUid.Invalid;
         delivery.GridUid = EntityUid.Invalid;
@@ -587,9 +581,6 @@ public sealed class NsvCargoPurchaseSystem : EntitySystem
 
     private void OnEntityTerminating(ref EntityTerminatingEvent args)
     {
-        if (_carts.Count == 0)
-            return;
-
         var entity = args.Entity.Owner;
         RemoveCartsWhere(key => key.Console == entity || key.Actor == entity);
     }
@@ -601,9 +592,6 @@ public sealed class NsvCargoPurchaseSystem : EntitySystem
 
     private void OnFtlStarted(ref FTLStartedEvent args)
     {
-        if (_carts.Count == 0)
-            return;
-
         var grid = args.Entity;
         RemoveCartsWhere(key => _carts[key].Fingerprint.GridUid == grid);
     }

@@ -12,9 +12,6 @@ public sealed partial class NsvCargoDeliveryComponent : Component
     public NsvCargoDeliveryState State;
 
     [ViewVariables]
-    public EntityUid HubUid = EntityUid.Invalid;
-
-    [ViewVariables]
     public int Amount;
 
     [ViewVariables]

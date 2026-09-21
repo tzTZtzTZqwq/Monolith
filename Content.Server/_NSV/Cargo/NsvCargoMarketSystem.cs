@@ -84,7 +84,6 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
         context = new NsvCargoMarketContext(
             consoleUid,
             gridUid,
-            gridUid,
             mapUid,
             hub,
             sector,
@@ -127,6 +126,25 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
         return NsvCargoFailure.None;
     }
 
+    /// <summary>
+    /// The fixed request preamble both cargo consoles run: gate the actor/console
+    /// (<see cref="ValidateConsoleRequest"/>) then resolve the trade context
+    /// (<see cref="TryResolveContext"/>). Callers layer their own buy/sell checks on top.
+    /// </summary>
+    public bool TryValidateAndResolve(
+        EntityUid actorUid,
+        EntityUid consoleUid,
+        out NsvCargoMarketContext context,
+        out NsvCargoFailure failure)
+    {
+        context = default;
+        failure = ValidateConsoleRequest(actorUid, consoleUid);
+        if (failure != NsvCargoFailure.None)
+            return false;
+
+        return TryResolveContext(consoleUid, out context, out failure);
+    }
+
     public bool TryGetBuyUnitPrice(
         CargoProductPrototype product,
         float defaultMultiplier,
@@ -141,23 +159,8 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
             return false;
         }
 
-        var rawPrice = (double) product.Cost * defaultMultiplier * offerMultiplier;
-        if (!double.IsFinite(rawPrice) || rawPrice <= 0d || rawPrice > TransactionCap)
-            return false;
-
-        var rounded = Math.Ceiling(rawPrice);
-        if (rounded <= 0d || rounded > TransactionCap)
-            return false;
-
-        try
-        {
-            unitPrice = checked((int) rounded);
-            return true;
-        }
-        catch (OverflowException)
-        {
-            return false;
-        }
+        // Buy prices round up so a fractional cost never sells below the configured rate.
+        return TryFiniteToCappedInt((double) product.Cost * defaultMultiplier * offerMultiplier, ceil: true, out unitPrice);
     }
 
     public bool TryGetSellAmount(double basePrice, float multiplier, out int amount)
@@ -169,17 +172,28 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
             return false;
         }
 
-        var rawAmount = basePrice * multiplier;
-        if (!double.IsFinite(rawAmount) || rawAmount <= 0d || rawAmount > TransactionCap)
+        // Sell payouts round down so the hub is never credited more than the goods are worth.
+        return TryFiniteToCappedInt(basePrice * multiplier, ceil: false, out amount);
+    }
+
+    /// <summary>
+    /// Rounds <paramref name="raw"/> to a positive, capped <see cref="int"/>: rejects
+    /// non-finite, non-positive or over-<see cref="TransactionCap"/> inputs, rounds up when
+    /// <paramref name="ceil"/> is set (else down), re-checks the bound and casts checked.
+    /// </summary>
+    private static bool TryFiniteToCappedInt(double raw, bool ceil, out int result)
+    {
+        result = 0;
+        if (!double.IsFinite(raw) || raw <= 0d || raw > TransactionCap)
             return false;
 
-        var rounded = Math.Floor(rawAmount);
+        var rounded = ceil ? Math.Ceiling(raw) : Math.Floor(raw);
         if (rounded <= 0d || rounded > TransactionCap)
             return false;
 
         try
         {
-            amount = checked((int) rounded);
+            result = checked((int) rounded);
             return true;
         }
         catch (OverflowException)
@@ -228,26 +242,7 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
             return false;
         }
 
-        try
-        {
-            var balance = checked(hub.Balance - amount);
-            var lifetimePurchases = checked(hub.LifetimePurchases + amount);
-            if (balance < 0 || balance > TransactionCap || lifetimePurchases < 0)
-            {
-                failure = NsvCargoFailure.AccountLimitExceeded;
-                return false;
-            }
-
-            hub.Balance = balance;
-            hub.LifetimePurchases = lifetimePurchases;
-            failure = NsvCargoFailure.None;
-            return true;
-        }
-        catch (OverflowException)
-        {
-            failure = NsvCargoFailure.AccountLimitExceeded;
-            return false;
-        }
+        return TryApplyAccountDeltas(hub, -amount, amount, 0, out failure);
     }
 
     public bool TryCredit(NsvCargoHubComponent hub, int amount, out NsvCargoFailure failure)
@@ -264,26 +259,7 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
             return false;
         }
 
-        try
-        {
-            var balance = checked(hub.Balance + amount);
-            var lifetimeSales = checked(hub.LifetimeSales + amount);
-            if (balance < 0 || balance > TransactionCap || lifetimeSales < 0)
-            {
-                failure = NsvCargoFailure.AccountLimitExceeded;
-                return false;
-            }
-
-            hub.Balance = balance;
-            hub.LifetimeSales = lifetimeSales;
-            failure = NsvCargoFailure.None;
-            return true;
-        }
-        catch (OverflowException)
-        {
-            failure = NsvCargoFailure.AccountLimitExceeded;
-            return false;
-        }
+        return TryApplyAccountDeltas(hub, amount, 0, amount, out failure);
     }
 
     public bool TryRefund(NsvCargoHubComponent hub, int amount, out NsvCargoFailure failure)
@@ -300,11 +276,29 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
             return false;
         }
 
+        return TryApplyAccountDeltas(hub, amount, -amount, 0, out failure);
+    }
+
+    /// <summary>
+    /// Applies signed deltas to the hub's balance and lifetime tallies as one checked,
+    /// all-or-nothing commit: on overflow or an out-of-range result nothing is written and
+    /// <see cref="NsvCargoFailure.AccountLimitExceeded"/> is returned. Balance is bounded to
+    /// [0, <see cref="TransactionCap"/>]; the lifetime tallies must stay non-negative. Callers
+    /// own the domain-specific pre-checks (funds, refund eligibility); this only guards arithmetic.
+    /// </summary>
+    private static bool TryApplyAccountDeltas(
+        NsvCargoHubComponent hub,
+        int balanceDelta,
+        int purchasesDelta,
+        int salesDelta,
+        out NsvCargoFailure failure)
+    {
         try
         {
-            var balance = checked(hub.Balance + amount);
-            var lifetimePurchases = checked(hub.LifetimePurchases - amount);
-            if (balance < 0 || balance > TransactionCap || lifetimePurchases < 0)
+            var balance = checked(hub.Balance + balanceDelta);
+            var lifetimePurchases = checked(hub.LifetimePurchases + purchasesDelta);
+            var lifetimeSales = checked(hub.LifetimeSales + salesDelta);
+            if (balance < 0 || balance > TransactionCap || lifetimePurchases < 0 || lifetimeSales < 0)
             {
                 failure = NsvCargoFailure.AccountLimitExceeded;
                 return false;
@@ -312,6 +306,7 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
 
             hub.Balance = balance;
             hub.LifetimePurchases = lifetimePurchases;
+            hub.LifetimeSales = lifetimeSales;
             failure = NsvCargoFailure.None;
             return true;
         }
@@ -494,7 +489,6 @@ public sealed partial class NsvCargoMarketSystem : EntitySystem
 public readonly record struct NsvCargoMarketContext(
     EntityUid ConsoleUid,
     EntityUid GridUid,
-    EntityUid HubUid,
     EntityUid MapUid,
     NsvCargoHubComponent Hub,
     NsvBluespaceSectorInstanceComponent Sector,
@@ -508,21 +502,19 @@ public readonly record struct NsvCargoMarketContext(
     public NsvCargoMarketFingerprint Fingerprint => new(
         ConsoleUid,
         GridUid,
-        HubUid,
         MapUid,
         StarmapId,
         NodeId,
-        MarketId?.ToString());
+        MarketId);
 }
 
 public readonly record struct NsvCargoMarketFingerprint(
     EntityUid ConsoleUid,
     EntityUid GridUid,
-    EntityUid HubUid,
     EntityUid MapUid,
     ProtoId<NsvBluespaceStarmapPrototype> StarmapId,
     string NodeId,
-    string? MarketId);
+    ProtoId<NsvCargoMarketPrototype>? MarketId);
 
 public readonly record struct NsvCargoResolvedBuyOffer(
     NsvCargoMarketBuyOfferDefinition Offer,
@@ -530,6 +522,11 @@ public readonly record struct NsvCargoResolvedBuyOffer(
     EntProtoId ProductId,
     int UnitPrice);
 
+/// <summary>
+/// Reason a cargo request was rejected. Players only ever see a single generic "rejected"
+/// popup; this fine granularity exists for the admin log (<see cref="NsvCargoMarketSystem.LogCargoAction"/>),
+/// so add values freely for diagnostics without needing a matching localized message.
+/// </summary>
 public enum NsvCargoFailure : byte
 {
     None,

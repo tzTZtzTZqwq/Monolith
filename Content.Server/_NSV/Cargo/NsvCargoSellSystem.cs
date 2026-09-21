@@ -65,7 +65,7 @@ public sealed class NsvCargoSellSystem : EntitySystem
             return;
         }
 
-        RefreshState(uid, actor, context);
+        RefreshState(uid, context);
     }
 
     private void OnAppraiseMessage(EntityUid uid, NsvCargoSellConsoleComponent component, NsvCargoSellAppraiseMessage args)
@@ -77,7 +77,7 @@ public sealed class NsvCargoSellSystem : EntitySystem
             return;
 
         // Appraisal never modifies the world.
-        RefreshState(uid, actor, context);
+        RefreshState(uid, context);
     }
 
     private void OnSellMessage(EntityUid uid, NsvCargoSellConsoleComponent component, NsvCargoSellRequestMessage args)
@@ -111,15 +111,13 @@ public sealed class NsvCargoSellSystem : EntitySystem
         context = default;
         market = null!;
 
-        var failure = _market.ValidateConsoleRequest(actor, uid);
-        if (failure != NsvCargoFailure.None)
+        if (!_market.TryValidateAndResolve(actor, uid, out context, out var failure))
         {
             Reject(uid, actor, failure);
             return false;
         }
 
-        if (!_market.TryResolveContext(uid, out context, out failure) ||
-            context.Market is not { } resolvedMarket || resolvedMarket.Sell is not { } sell)
+        if (context.Market is not { } resolvedMarket || resolvedMarket.Sell is not { } sell)
         {
             Reject(uid, actor, context.Market is null
                 ? NsvCargoFailure.SellingUnavailable
@@ -141,14 +139,14 @@ public sealed class NsvCargoSellSystem : EntitySystem
         if (!TryGatherPalletGoods(uid, console, context, market, out var roots, out var total, out var failure))
         {
             Reject(uid, actor, failure);
-            RefreshState(uid, actor, context);
+            RefreshState(uid, context);
             return;
         }
 
         if (roots.Count == 0)
         {
             _popup.PopupEntity(Loc.GetString("nsv-cargo-sell-no-goods"), actor, actor);
-            RefreshState(uid, actor, context);
+            RefreshState(uid, context);
             return;
         }
 
@@ -159,7 +157,7 @@ public sealed class NsvCargoSellSystem : EntitySystem
             if (newBalance < 0 || newBalance > NsvCargoMarketSystem.TransactionCap)
             {
                 Reject(uid, actor, NsvCargoFailure.AccountLimitExceeded);
-                RefreshState(uid, actor, context);
+                RefreshState(uid, context);
                 return;
             }
         }
@@ -183,13 +181,13 @@ public sealed class NsvCargoSellSystem : EntitySystem
             Log.Error($"NSV cargo sale on {ToPrettyString(uid)} deleted {roots.Count} roots but crediting {total} failed: {creditFailure}");
             _market.LogCargoAction(NsvCargoLogAction.RequestRejected, actor, uid, context, roots.Count, total, creditFailure);
             _popup.PopupEntity(Loc.GetString("nsv-cargo-sell-failed"), actor, actor);
-            RefreshState(uid, actor, context);
+            RefreshState(uid, context);
             return;
         }
 
         _market.LogCargoAction(NsvCargoLogAction.Sale, actor, uid, context, roots.Count, total, NsvCargoFailure.None);
         _popup.PopupEntity(Loc.GetString("nsv-cargo-sell-sold", ("amount", total)), actor, actor);
-        RefreshState(uid, actor, context);
+        RefreshState(uid, context);
     }
 
     private bool TryGatherPalletGoods(
@@ -330,7 +328,7 @@ public sealed class NsvCargoSellSystem : EntitySystem
         return true;
     }
 
-    private void RefreshState(EntityUid uid, EntityUid actor, NsvCargoMarketContext context)
+    private void RefreshState(EntityUid uid, NsvCargoMarketContext context)
     {
         var marketName = string.Empty;
         var enabled = false;
@@ -359,11 +357,7 @@ public sealed class NsvCargoSellSystem : EntitySystem
 
     private void SendDisabledState(EntityUid uid, NsvCargoMarketContext? context)
     {
-        var balance = 0;
-        if (context?.Hub is { } hub)
-            balance = hub.Balance;
-
-        var state = new NsvCargoSellInterfaceState(balance, 0, 0, string.Empty, false);
+        var state = new NsvCargoSellInterfaceState(context?.Hub.Balance ?? 0, 0, 0, string.Empty, false);
         _ui.SetUiState(uid, NsvCargoSellUiKey.Key, state);
     }
 
