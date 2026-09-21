@@ -2,11 +2,15 @@ using System.Collections.Generic;
 using System.Linq;
 using Content.Server._NSV.Administration;
 using Content.Server._NSV.Bluespace.Sectors;
+using Content.Server._NSV.Bluespace.Strategy;
 using Content.Shared._NSV.Administration;
+using Content.Shared._NSV.Bluespace.Starmap;
 using Content.Shared._NSV.CCVar;
 using Robust.Server.GameObjects;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
+using Robust.Shared.Prototypes;
+using Robust.Shared.Utility;
 
 namespace Content.IntegrationTests.Tests._NSV.Administration;
 
@@ -168,6 +172,108 @@ public sealed class NsvSectorMonitorEuiTest
                 });
             }
         }
+
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task ReportsStarmapNodesAndSectorState()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var prototypes = server.ResolveDependency<IPrototypeManager>();
+        var map = entityManager.System<MapSystem>();
+        var createdMaps = new List<MapId>();
+
+        var starmap = prototypes.Index<NsvBluespaceStarmapPrototype>("NSVBluespaceStrategicMap");
+        var firstNodeId = starmap.NodeDefinitions.First().ID;
+
+        try
+        {
+            await server.WaitAssertion(() =>
+            {
+                // Stand up an active sector bound to the first starmap node.
+                var mapUid = map.CreateMap(out var mapId, false);
+                createdMaps.Add(mapId);
+                var instance = entityManager.EnsureComponent<NsvBluespaceSectorInstanceComponent>(mapUid);
+                instance.MapId = mapId;
+                instance.StarmapId = "NSVBluespaceStrategicMap";
+                instance.NodeId = firstNodeId;
+                instance.State = NsvBluespaceSectorState.Ready;
+
+                var state = GetMonitorState();
+                Assert.That(state.StarmapId, Is.EqualTo("NSVBluespaceStrategicMap"));
+                Assert.That(state.Nodes, Has.Length.EqualTo(starmap.NodeDefinitions.Count));
+
+                var boundNode = state.Nodes.Single(n => n.Id == firstNodeId);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(boundNode.HasSector, Is.True);
+                    Assert.That(boundNode.SectorState, Is.EqualTo(nameof(NsvBluespaceSectorState.Ready)));
+                });
+
+                // A node with no active sector reports data-only.
+                var otherNode = state.Nodes.First(n => n.Id != firstNodeId);
+                Assert.That(otherNode.HasSector, Is.False);
+                Assert.That(otherNode.SectorState, Is.Null);
+            });
+        }
+        finally
+        {
+            await server.WaitPost(() =>
+            {
+                foreach (var mapId in createdMaps)
+                {
+                    if (map.MapExists(mapId))
+                        map.DeleteMap(mapId);
+                }
+            });
+        }
+
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task MoveFleetChangesResidencyAndMonitorReflectsIt()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+        var prototypes = server.ResolveDependency<IPrototypeManager>();
+
+        var starmap = prototypes.Index<NsvBluespaceStarmapPrototype>("NSVBluespaceStrategicMap");
+        var nodes = starmap.NodeDefinitions.Select(n => n.ID).ToArray();
+        var origin = new NsvFleetNodeKey("NSVBluespaceStrategicMap", nodes[0]);
+        var destination = new NsvFleetNodeKey("NSVBluespaceStrategicMap", nodes[1]);
+
+        await server.WaitAssertion(() =>
+        {
+            var grid = mapManager.CreateGridEntity(testMap.MapId).Owner;
+            var ship = fleets.RegisterShip(grid, new ResPath("/Maps/_NSV/test.yml"), origin);
+
+            // A Live ship cannot travel the strategic map; it must serialize first.
+            Assert.That(fleets.TryMoveShipToNode(ship.Id, destination, out _), Is.False);
+
+            Assert.That(fleets.TrySerializeShip(ship.Id, out var serializeFailure), Is.True, serializeFailure);
+            Assert.That(fleets.GetResidentShips(origin), Does.Contain(ship.Id));
+
+            Assert.That(fleets.TryMoveShipToNode(ship.Id, destination, out var moveFailure), Is.True, moveFailure);
+            Assert.Multiple(() =>
+            {
+                Assert.That(fleets.GetResidentShips(origin), Does.Not.Contain(ship.Id));
+                Assert.That(fleets.GetResidentShips(destination), Does.Contain(ship.Id));
+                Assert.That(ship.DataNode?.NodeId, Is.EqualTo(nodes[1]));
+            });
+
+            var state = GetMonitorState();
+            var fleet = state.Fleets.Single(f => f.ShipId == ship.Id);
+            Assert.That(fleet.NodeId, Is.EqualTo(nodes[1]));
+            Assert.That(state.Nodes.Single(n => n.Id == nodes[1]).ResidentShipIds, Does.Contain(ship.Id));
+        });
 
         await pair.CleanReturnAsync();
     }
