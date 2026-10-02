@@ -83,7 +83,6 @@
     fuelCost: 2
     encounterPool:
     - NSVClearSystemContract
-    - NSVHoldContract
     connections:
     - alpha-3
     - beta-2
@@ -155,15 +154,16 @@
   - id: charlie-4
     name: nsv-bluespace-starmap-node-charlie-4-name
     description: nsv-bluespace-starmap-node-charlie-4-description
-    type: UnknownSignal
+    type: PiratePatrol
     position: 315, 276
-    sectorTemplate: NSVBluespaceAsteroidSector
-    faction: NSVNeutral
+    sectorTemplate: NSVBluespaceHunterSector
+    faction: NSVHostile
     seed: 191
-    threat: 2
-    reward: 1
+    threat: 3
+    reward: 3
     fuelCost: 2
-    encounterPool: []
+    encounterPool:
+    - NSVHoldContract
     connections:
     - alpha-3
     - charlie-1

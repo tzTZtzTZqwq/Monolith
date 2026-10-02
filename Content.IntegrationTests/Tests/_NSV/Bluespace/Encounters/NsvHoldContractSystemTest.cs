@@ -43,12 +43,12 @@ public sealed class NsvHoldContractSystemTest
             Assert.That(gameTicker.StartGameRule("NsvCampaign"), Is.True);
             Assert.That(campaign.TryBuildSummary()!.Score, Is.EqualTo(0));
 
-            // beta-1 carries the Hold pool; its reward is 2.
+            // charlie-4 is the production Hold node; its reward is 3.
             var sector = entityManager.AddComponent<NsvBluespaceSectorInstanceComponent>(sectorMap.MapUid);
             sector.State = NsvBluespaceSectorState.Ready;
             sector.MapId = sectorMap.MapId;
             sector.StarmapId = "NSVBluespaceStrategicMap";
-            sector.NodeId = "beta-1";
+            sector.NodeId = "charlie-4";
             sector.EncounterDefinitionId = "NSVHoldContract";
 
             encounters.DispatchArrival(sectorMap.MapUid, shuttleUid);
@@ -94,7 +94,7 @@ public sealed class NsvHoldContractSystemTest
             Assert.Multiple(() =>
             {
                 Assert.That(encounter.State, Is.EqualTo(NsvBluespaceEncounterState.ExtractionOpen));
-                Assert.That(campaign.TryBuildSummary()!.Score, Is.EqualTo(2),
+                Assert.That(campaign.TryBuildSummary()!.Score, Is.EqualTo(3),
                     "surviving the hold awards the node reward");
                 Assert.That(encounters.CanReturn(sectorMap.MapUid, shuttleUid, out _), Is.True);
             });
