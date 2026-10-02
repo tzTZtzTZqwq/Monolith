@@ -1,6 +1,7 @@
 using Content.Server._NSV.Bluespace.Strategy;
 using Content.Server._NSV.GameRule.Components;
 using Content.Server.Chat.Managers;
+using Content.Server.GameTicking;
 using Content.Server.GameTicking.Rules;
 using Content.Server.RoundEnd;
 using Content.Server.Voting;
@@ -13,7 +14,6 @@ using Content.Shared.Power;
 using Robust.Shared.Configuration;
 using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
-using Robust.Shared.Timing;
 
 namespace Content.Server._NSV.GameRule;
 
@@ -22,6 +22,12 @@ namespace Content.Server._NSV.GameRule;
 /// <see cref="NsvCampaignRuleComponent"/> (the game-rule entity); this system reacts to the
 /// rule's lifecycle and is otherwise stateless.
 /// </summary>
+/// <remarks>
+/// Two views of "the running campaign": <see cref="ActiveCampaigns"/> (rule active) for read-only
+/// accessors, and <see cref="LiveCampaigns"/> (rule active, round in progress, not yet concluded) for
+/// every mutation. The narrower gate matters at round restart: the rule stays active while the
+/// entity flush deletes ships and flagships, and those deaths must not score or end the next round.
+/// </remarks>
 public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRuleComponent>
 {
     // Baseline "perform N jumps" objective range (ROUND-001, S2).
@@ -30,7 +36,9 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
 
     // Outcome vote shown when every objective is complete (S3).
     private static readonly TimeSpan OutcomeVoteDuration = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan ExtensionDuration = TimeSpan.FromMinutes(60);
+
+    private const string ExtendOption = "extend";
+    private const string EndOption = "end";
 
     [Dependency] private IChatManager _chat = default!;
     [Dependency] private IVoteManager _votes = default!;
@@ -40,8 +48,9 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     [Dependency] private IPrototypeManager _protos = default!;
 
     /// <summary>
-    /// Raised when the campaign readout (score / threat) changes outside a jump so listeners like the
-    /// navigation console can push a fresh state without waiting for the next sector event.
+    /// Raised when the campaign readout (phase / score / threat / objective tally) changes so
+    /// listeners like the navigation console can push a fresh state without waiting for a sector
+    /// event. Only raised when a value actually changed.
     /// </summary>
     public event Action? CampaignDisplayChanged;
 
@@ -70,20 +79,61 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     protected override void Ended(EntityUid uid, NsvCampaignRuleComponent component, GameRuleComponent gameRule, GameRuleEndedEvent args)
     {
         component.Phase = NsvCampaignPhase.Ended;
+        component.ExtensionRemaining = null;
+
+        // A vote still open when the rule ends (e.g. an admin restart) must not resolve into the next
+        // round. Its OnFinished also re-checks liveness, so this is belt and braces.
+        if (component.OutcomeVote is { Finished: false, Cancelled: false } vote)
+            vote.Cancel();
+        component.OutcomeVote = null;
+    }
+
+    protected override void ActiveTick(EntityUid uid, NsvCampaignRuleComponent component, GameRuleComponent gameRule, float frameTime)
+    {
+        if (GameTicker.RunLevel != GameRunLevel.InRound || component.Phase == NsvCampaignPhase.Ended)
+            return;
+
+        if (TickExtension(component, frameTime))
+            return;
+
+        TickThreatGrowth(component, frameTime);
+    }
+
+    /// <summary>
+    /// Counts down a voted extension and concludes the round when it runs out. Returns true once the
+    /// round has been concluded this tick.
+    /// </summary>
+    private bool TickExtension(NsvCampaignRuleComponent component, float frameTime)
+    {
+        if (component.ExtensionRemaining is not { } remaining)
+            return false;
+
+        remaining -= frameTime;
+        if (remaining > 0f)
+        {
+            component.ExtensionRemaining = remaining;
+            return false;
+        }
+
+        Conclude(component, null);
+        CampaignDisplayChanged?.Invoke();
+        _chat.DispatchServerAnnouncement(Loc.GetString("nsv-campaign-extension-over"));
+        _roundEnd.EndRound();
+        return true;
     }
 
     /// <summary>
     /// Passive threat growth (S5): after a grace period of active-campaign time, threat rises by a
     /// fixed amount every fixed interval. Kills add threat on top of this via the kill-threat path.
+    /// The grace clock always runs, so disabling growth (interval &lt;= 0) and re-enabling it later
+    /// doesn't restart the grace period.
     /// </summary>
-    protected override void ActiveTick(EntityUid uid, NsvCampaignRuleComponent component, GameRuleComponent gameRule, float frameTime)
+    private void TickThreatGrowth(NsvCampaignRuleComponent component, float frameTime)
     {
-        var interval = _cfg.GetCVar(NsvCCVars.CampaignThreatGrowthInterval);
-        if (interval <= 0f)
-            return;
-
         component.ActiveTime += frameTime;
-        if (component.ActiveTime < _cfg.GetCVar(NsvCCVars.CampaignThreatGracePeriod))
+
+        var interval = _cfg.GetCVar(NsvCCVars.CampaignThreatGrowthInterval);
+        if (interval <= 0f || component.ActiveTime < _cfg.GetCVar(NsvCCVars.CampaignThreatGracePeriod))
             return;
 
         var amount = _cfg.GetCVar(NsvCCVars.CampaignThreatGrowthAmount);
@@ -92,8 +142,7 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
         while (component.ThreatGrowthAccumulator >= interval)
         {
             component.ThreatGrowthAccumulator -= interval;
-            component.ThreatElevation += amount;
-            grew = true;
+            grew |= AdjustThreat(component, amount);
         }
 
         if (grew)
@@ -101,18 +150,16 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     }
 
     /// <summary>
-    /// Advances every in-progress PerformJumps objective on the active campaign by one, flipping it
-    /// to Completed once its target is met. Called on each player FTL arrival into a bluespace sector.
+    /// Advances every in-progress PerformJumps objective on the live campaign by one, flipping it to
+    /// Completed once its target is met. Called on each player FTL arrival into a bluespace sector
+    /// (including Home arrivals, which then also go through <see cref="NotifyHomeArrival"/>).
     /// </summary>
     public void NotifyJumpArrived()
     {
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out var component, out var gameRule))
+        var changed = false;
+        foreach (var campaign in LiveCampaigns())
         {
-            if (!GameTicker.IsGameRuleActive(uid, gameRule))
-                continue;
-
-            foreach (var objective in component.Objectives)
+            foreach (var objective in campaign.Comp.Objectives)
             {
                 if (objective.Kind != NsvCampaignObjectiveKind.PerformJumps ||
                     objective.Status != NsvCampaignObjectiveStatus.InProgress)
@@ -121,23 +168,27 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
                 }
 
                 objective.Tally++;
+                changed = true;
                 if (objective.Tally >= objective.Target)
                 {
                     objective.Status = NsvCampaignObjectiveStatus.Completed;
-                    NegateThreatForObjective(objective);
+                    NegateThreatForObjective(campaign.Comp, objective);
                 }
             }
 
-            TryStartOutcomeVote(component);
+            TryStartOutcomeVote(campaign);
         }
+
+        if (changed)
+            CampaignDisplayChanged?.Invoke();
     }
 
     /// <summary>
-    /// Eases campaign threat when an objective is first completed (S5), rewarding progress. Guarded by
-    /// <see cref="NsvCampaignObjective.ThreatNegated"/> so each objective decays threat at most once,
-    /// which also stops a re-completed objective from farming the reduction.
+    /// Eases the owning campaign's threat when an objective is first completed (S5), rewarding
+    /// progress. Guarded by <see cref="NsvCampaignObjective.ThreatNegated"/> so each objective decays
+    /// threat at most once, which also stops a re-completed objective from farming the reduction.
     /// </summary>
-    private void NegateThreatForObjective(NsvCampaignObjective objective)
+    private void NegateThreatForObjective(NsvCampaignRuleComponent component, NsvCampaignObjective objective)
     {
         if (objective.ThreatNegated)
             return;
@@ -146,11 +197,11 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
 
         var negation = _cfg.GetCVar(NsvCCVars.CampaignObjectiveThreatNegation);
         if (negation > 0f)
-            AdjustThreatElevation(-negation);
+            AdjustThreat(component, -negation);
     }
 
     /// <summary>
-    /// Awards a cleared encounter's starmap-node reward to every active campaign's score (S4). Called
+    /// Awards a cleared encounter's starmap-node reward to every live campaign's score (S4). Called
     /// from the encounter-completion path with the sector's originating starmap node; a template sector
     /// with no starmap node, an unknown node, or a zero-reward node is a no-op.
     /// </summary>
@@ -164,13 +215,9 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
         }
 
         var awarded = false;
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out var component, out var gameRule))
+        foreach (var campaign in LiveCampaigns())
         {
-            if (!GameTicker.IsGameRuleActive(uid, gameRule))
-                continue;
-
-            component.Score += node.Reward;
+            campaign.Comp.Score += node.Reward;
             awarded = true;
         }
 
@@ -192,26 +239,25 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
 
         var concluded = false;
         var blockedScore = -1;
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out var component, out var gameRule))
+        foreach (var campaign in LiveCampaigns())
         {
-            if (!GameTicker.IsGameRuleActive(uid, gameRule) || component.Outcome != NsvCampaignOutcome.None)
+            if (campaign.Comp.Outcome != NsvCampaignOutcome.None)
                 continue;
 
-            if (component.Score < threshold)
+            if (campaign.Comp.Score < threshold)
             {
                 if (blockedScore < 0)
-                    blockedScore = component.Score;
+                    blockedScore = campaign.Comp.Score;
                 continue;
             }
 
-            component.Outcome = NsvCampaignOutcome.Victory;
-            component.Phase = NsvCampaignPhase.Ended;
+            Conclude(campaign.Comp, NsvCampaignOutcome.Victory);
             concluded = true;
         }
 
         if (concluded)
         {
+            CampaignDisplayChanged?.Invoke();
             _chat.DispatchServerAnnouncement(Loc.GetString("nsv-campaign-victory-home"));
             _roundEnd.EndRound();
             return;
@@ -225,7 +271,7 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     }
 
     /// <summary>
-    /// Awards the entity's <see cref="NsvCampaignKillRewardComponent.Score"/> to every active campaign
+    /// Awards the entity's <see cref="NsvCampaignKillRewardComponent.Score"/> to every live campaign
     /// when it is destroyed. Any termination counts (first pass; no killer-faction gating).
     /// </summary>
     private void OnKillRewardTerminating(EntityUid uid, NsvCampaignKillRewardComponent reward, ref EntityTerminatingEvent args)
@@ -246,30 +292,27 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     }
 
     /// <summary>
-    /// Adds the reward's score to every active campaign, at most once per entity. Ships dying in the
+    /// Adds the reward's score to every live campaign, at most once per entity. Ships dying in the
     /// data state (their grid parked on the registry holding map) are AI-vs-AI abstract-combat losses,
-    /// not player kills, so they never score.
+    /// not player kills, so they never score; neither do deaths outside a live round (e.g. the
+    /// restart flush).
     /// </summary>
     private void AwardKill(EntityUid uid, NsvCampaignKillRewardComponent reward)
     {
         if (reward.Rewarded || IsDataStateGrid(uid))
             return;
 
+        var campaigns = LiveCampaigns();
+        if (campaigns.Count == 0)
+            return;
+
         reward.Rewarded = true;
-
-        var awarded = false;
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var ruleUid, out var component, out var gameRule))
+        foreach (var campaign in campaigns)
         {
-            if (!GameTicker.IsGameRuleActive(ruleUid, gameRule))
-                continue;
-
-            component.Score += reward.Score;
-            awarded = true;
+            campaign.Comp.Score += reward.Score;
         }
 
-        if (awarded)
-            CampaignDisplayChanged?.Invoke();
+        CampaignDisplayChanged?.Invoke();
     }
 
     /// <summary>
@@ -294,17 +337,27 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     }
 
     /// <summary>
-    /// Adds the component's threat to every active campaign via <see cref="AdjustThreatElevation"/>
-    /// (floored at 0 there), at most once per entity. Data-state (parked) deaths are AI-vs-AI abstract
-    /// losses and never raise threat.
+    /// Adds the component's threat to every live campaign (floored at 0), at most once per entity.
+    /// Data-state (parked) deaths are AI-vs-AI abstract losses and never raise threat.
     /// </summary>
     private void ContributeKillThreat(EntityUid uid, NsvCampaignKillThreatComponent threat)
     {
         if (threat.Contributed || IsDataStateGrid(uid))
             return;
 
+        var campaigns = LiveCampaigns();
+        if (campaigns.Count == 0)
+            return;
+
         threat.Contributed = true;
-        AdjustThreatElevation(threat.Threat);
+        var adjusted = false;
+        foreach (var campaign in campaigns)
+        {
+            adjusted |= AdjustThreat(campaign.Comp, threat.Threat);
+        }
+
+        if (adjusted)
+            CampaignDisplayChanged?.Invoke();
     }
 
     /// <summary>
@@ -364,24 +417,25 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     /// <summary>
     /// Losing the flagship (the marked entity terminating — e.g. the ship's main console destroyed
     /// with the ship) concludes the round in defeat. Guarded by <see cref="NsvCampaignOutcome"/> so a
-    /// campaign that has already reached an outcome (a won round mid-extension) isn't overwritten.
+    /// campaign that has already reached an outcome (a won round mid-extension) isn't overwritten, and
+    /// by <see cref="LiveCampaigns"/> so the restart flush deleting the flagship isn't a defeat.
     /// </summary>
     private void OnFlagshipTerminating(EntityUid uid, NsvCampaignFlagshipComponent component, ref EntityTerminatingEvent args)
     {
         var concluded = false;
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var ruleUid, out var rule, out var gameRule))
+        foreach (var campaign in LiveCampaigns())
         {
-            if (!GameTicker.IsGameRuleActive(ruleUid, gameRule) || rule.Outcome != NsvCampaignOutcome.None)
+            if (campaign.Comp.Outcome != NsvCampaignOutcome.None)
                 continue;
 
-            rule.Outcome = NsvCampaignOutcome.Defeat;
+            Conclude(campaign.Comp, NsvCampaignOutcome.Defeat);
             concluded = true;
         }
 
         if (!concluded)
             return;
 
+        CampaignDisplayChanged?.Invoke();
         _chat.DispatchServerAnnouncement(Loc.GetString("nsv-campaign-defeat-flagship-lost"));
         _roundEnd.EndRound();
     }
@@ -390,8 +444,9 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     /// When every round objective is complete, puts the outcome vote to the crew. Guarded by
     /// <see cref="NsvCampaignRuleComponent.Outcome"/> so it fires at most once per round.
     /// </summary>
-    private void TryStartOutcomeVote(NsvCampaignRuleComponent component)
+    private void TryStartOutcomeVote(Entity<NsvCampaignRuleComponent> campaign)
     {
+        var component = campaign.Comp;
         if (component.Outcome != NsvCampaignOutcome.None || component.Objectives.Count == 0)
             return;
 
@@ -401,24 +456,23 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
                 return;
         }
 
-        StartOutcomeVote(component);
+        StartOutcomeVote(campaign);
     }
 
     /// <summary>
-    /// Admin override: puts the outcome vote to the crew on the first active campaign that isn't
+    /// Admin override: puts the outcome vote to the crew on the first live campaign that isn't
     /// already resolving one, regardless of objective progress. Exposed for the sector-monitor admin
     /// panel so the vote flow can be exercised without completing every objective. Returns false when
     /// no eligible campaign exists.
     /// </summary>
     public bool ForceOutcomeVote()
     {
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out var component, out var gameRule))
+        foreach (var campaign in LiveCampaigns())
         {
-            if (!GameTicker.IsGameRuleActive(uid, gameRule) || component.Outcome != NsvCampaignOutcome.None)
+            if (campaign.Comp.Outcome != NsvCampaignOutcome.None)
                 continue;
 
-            StartOutcomeVote(component);
+            StartOutcomeVote(campaign);
             return true;
         }
 
@@ -426,42 +480,74 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     }
 
     /// <summary>
-    /// Records a victory and puts the "press on or conclude" decision to a crew vote: press on
-    /// extends the round by 60 minutes, otherwise it ends now.
+    /// Records a victory and puts the "press on or conclude" decision to a crew vote; the result is
+    /// applied by <see cref="ApplyOutcomeVoteResult"/>.
     /// </summary>
-    private void StartOutcomeVote(NsvCampaignRuleComponent component)
+    private void StartOutcomeVote(Entity<NsvCampaignRuleComponent> campaign)
     {
-        component.Outcome = NsvCampaignOutcome.Victory;
+        campaign.Comp.Outcome = NsvCampaignOutcome.Victory;
 
+        var minutes = (int) MathF.Round(_cfg.GetCVar(NsvCCVars.CampaignExtensionDuration) / 60f);
         var options = new VoteOptions
         {
             Title = Loc.GetString("nsv-campaign-vote-title"),
             Options =
             {
-                (Loc.GetString("nsv-campaign-vote-extend"), "extend"),
-                (Loc.GetString("nsv-campaign-vote-end"), "end"),
+                (Loc.GetString("nsv-campaign-vote-extend", ("minutes", minutes)), ExtendOption),
+                (Loc.GetString("nsv-campaign-vote-end"), EndOption),
             },
             Duration = OutcomeVoteDuration,
         };
         options.SetInitiatorOrServer(null);
 
+        var ruleUid = campaign.Owner;
         var vote = _votes.CreateVote(options);
-        vote.OnFinished += (_, args) =>
+        campaign.Comp.OutcomeVote = vote;
+        vote.OnFinished += (_, args) => ApplyOutcomeVoteResult(ruleUid, args.Winner as string);
+    }
+
+    /// <summary>
+    /// Applies a finished outcome vote. Ties (null winner) and an "end" majority both conclude the
+    /// round; only an explicit "extend" majority keeps it going, for
+    /// <see cref="NsvCCVars.CampaignExtensionDuration"/> seconds. A no-op unless the voting rule is
+    /// still live and undecided, so a vote outliving its round never touches the next one. Internal
+    /// so tests can resolve a vote without driving the vote manager.
+    /// </summary>
+    internal void ApplyOutcomeVoteResult(EntityUid ruleUid, string? winner)
+    {
+        if (!TryGetLiveCampaign(ruleUid, out var component) || component.Phase != NsvCampaignPhase.Active)
+            return;
+
+        component.OutcomeVote = null;
+
+        if (winner == ExtendOption)
         {
-            // Ties (Winner == null) and an "end" majority both conclude the round; only an explicit
-            // "extend" majority keeps it going.
-            if (args.Winner is "extend")
-            {
-                component.Phase = NsvCampaignPhase.Extending;
-                _chat.DispatchServerAnnouncement(Loc.GetString("nsv-campaign-vote-extended"));
-                Timer.Spawn(ExtensionDuration, () => _roundEnd.EndRound());
-            }
-            else
-            {
-                _chat.DispatchServerAnnouncement(Loc.GetString("nsv-campaign-vote-ended"));
-                _roundEnd.EndRound();
-            }
-        };
+            var duration = MathF.Max(0f, _cfg.GetCVar(NsvCCVars.CampaignExtensionDuration));
+            component.Phase = NsvCampaignPhase.Extending;
+            component.ExtensionRemaining = duration;
+            CampaignDisplayChanged?.Invoke();
+            _chat.DispatchServerAnnouncement(Loc.GetString("nsv-campaign-vote-extended",
+                ("minutes", (int) MathF.Round(duration / 60f))));
+            return;
+        }
+
+        Conclude(component, null);
+        CampaignDisplayChanged?.Invoke();
+        _chat.DispatchServerAnnouncement(Loc.GetString("nsv-campaign-vote-ended"));
+        _roundEnd.EndRound();
+    }
+
+    /// <summary>
+    /// Marks a campaign concluded: optionally records the outcome, ends the phase, and stops any
+    /// extension countdown. Callers announce and end the round.
+    /// </summary>
+    private static void Conclude(NsvCampaignRuleComponent component, NsvCampaignOutcome? outcome)
+    {
+        if (outcome is { } recorded)
+            component.Outcome = recorded;
+
+        component.Phase = NsvCampaignPhase.Ended;
+        component.ExtensionRemaining = null;
     }
 
     /// <summary>
@@ -470,36 +556,38 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     /// </summary>
     public bool HasActiveCampaign()
     {
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out _, out var gameRule))
-        {
-            if (GameTicker.IsGameRuleActive(uid, gameRule))
-                return true;
-        }
-
-        return false;
+        return ActiveCampaigns().Count > 0;
     }
 
     /// <summary>
-    /// Adjusts the threat elevation on every active campaign by <paramref name="delta"/> (may be
-    /// negative), floored at 0. The single mutation entry point for S5 passive growth / kill bumps /
-    /// objective-completion decay and S7 fleet-size scaling; the field is otherwise [Access]-locked.
+    /// Adjusts the threat elevation on every live campaign by <paramref name="delta"/> (may be
+    /// negative), floored at 0. Public entry point for external threat sources; the field is
+    /// otherwise [Access]-locked.
     /// </summary>
     public void AdjustThreatElevation(float delta)
     {
         var adjusted = false;
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out var component, out var gameRule))
+        foreach (var campaign in LiveCampaigns())
         {
-            if (!GameTicker.IsGameRuleActive(uid, gameRule))
-                continue;
-
-            component.ThreatElevation = MathF.Max(0f, component.ThreatElevation + delta);
-            adjusted = true;
+            adjusted |= AdjustThreat(campaign.Comp, delta);
         }
 
         if (adjusted)
             CampaignDisplayChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Single mutation point for one campaign's threat: applies <paramref name="delta"/> floored at 0
+    /// and returns whether the value changed. Callers raise <see cref="CampaignDisplayChanged"/>.
+    /// </summary>
+    private static bool AdjustThreat(NsvCampaignRuleComponent component, float delta)
+    {
+        var next = MathF.Max(0f, component.ThreatElevation + delta);
+        if (next.Equals(component.ThreatElevation))
+            return false;
+
+        component.ThreatElevation = next;
+        return true;
     }
 
     /// <summary>
@@ -508,16 +596,8 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     /// </summary>
     public float GetThreatElevation()
     {
-        var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
-        while (query.MoveNext(out var uid, out var component, out var gameRule))
-        {
-            if (!GameTicker.IsGameRuleActive(uid, gameRule))
-                continue;
-
-            return component.ThreatElevation;
-        }
-
-        return 0f;
+        var campaigns = ActiveCampaigns();
+        return campaigns.Count > 0 ? campaigns[0].Comp.ThreatElevation : 0f;
     }
 
     /// <summary>
@@ -526,37 +606,79 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     /// </summary>
     public NsvCampaignSummaryState? TryBuildSummary()
     {
+        var campaigns = ActiveCampaigns();
+        if (campaigns.Count == 0)
+            return null;
+
+        var component = campaigns[0].Comp;
+        var objectives = new List<NsvCampaignObjectiveReadout>(component.Objectives.Count);
+        foreach (var objective in component.Objectives)
+        {
+            objectives.Add(new NsvCampaignObjectiveReadout(
+                GetObjectiveLabel(objective.Kind),
+                GetObjectiveStatus(objective.Status),
+                objective.Tally,
+                objective.Target));
+        }
+
+        return new NsvCampaignSummaryState(
+            GetPhase(component.Phase),
+            component.Score,
+            (int) MathF.Round(component.ThreatElevation),
+            objectives);
+    }
+
+    /// <summary>
+    /// Every campaign rule that is currently active. Snapshot list, safe to mutate while iterating.
+    /// Use for read-only accessors.
+    /// </summary>
+    private List<Entity<NsvCampaignRuleComponent>> ActiveCampaigns()
+    {
+        var campaigns = new List<Entity<NsvCampaignRuleComponent>>();
         var query = EntityQueryEnumerator<NsvCampaignRuleComponent, GameRuleComponent>();
         while (query.MoveNext(out var uid, out var component, out var gameRule))
         {
-            if (!GameTicker.IsGameRuleActive(uid, gameRule))
-                continue;
-
-            var objectives = new List<NsvCampaignObjectiveReadout>(component.Objectives.Count);
-            foreach (var objective in component.Objectives)
-            {
-                objectives.Add(new NsvCampaignObjectiveReadout(
-                    GetObjectiveLabel(objective.Kind),
-                    GetObjectiveStatus(objective.Status),
-                    objective.Tally,
-                    objective.Target));
-            }
-
-            return new NsvCampaignSummaryState(
-                GetPhase(component.Phase),
-                component.Score,
-                (int) MathF.Round(component.ThreatElevation),
-                objectives);
+            if (GameTicker.IsGameRuleActive(uid, gameRule))
+                campaigns.Add((uid, component));
         }
 
-        return null;
+        return campaigns;
+    }
+
+    /// <summary>
+    /// Active campaigns that can still change: the round is in progress and the campaign hasn't been
+    /// concluded. Every mutation (scoring, threat, objectives, outcomes) goes through this gate.
+    /// </summary>
+    private List<Entity<NsvCampaignRuleComponent>> LiveCampaigns()
+    {
+        if (GameTicker.RunLevel != GameRunLevel.InRound)
+            return new List<Entity<NsvCampaignRuleComponent>>();
+
+        var campaigns = ActiveCampaigns();
+        campaigns.RemoveAll(campaign => campaign.Comp.Phase == NsvCampaignPhase.Ended);
+        return campaigns;
+    }
+
+    private bool TryGetLiveCampaign(EntityUid ruleUid, out NsvCampaignRuleComponent component)
+    {
+        component = default!;
+        if (GameTicker.RunLevel != GameRunLevel.InRound ||
+            !TryComp<NsvCampaignRuleComponent>(ruleUid, out var found) ||
+            !TryComp<GameRuleComponent>(ruleUid, out var gameRule) ||
+            !GameTicker.IsGameRuleActive(ruleUid, gameRule) ||
+            found.Phase == NsvCampaignPhase.Ended)
+        {
+            return false;
+        }
+
+        component = found;
+        return true;
     }
 
     private static string GetPhase(NsvCampaignPhase phase)
     {
         return phase switch
         {
-            NsvCampaignPhase.Briefing => "nsv-campaign-phase-briefing",
             NsvCampaignPhase.Active => "nsv-campaign-phase-active",
             NsvCampaignPhase.Extending => "nsv-campaign-phase-extending",
             NsvCampaignPhase.Ended => "nsv-campaign-phase-ended",
@@ -579,8 +701,6 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
         {
             NsvCampaignObjectiveStatus.InProgress => "nsv-campaign-objective-status-inprogress",
             NsvCampaignObjectiveStatus.Completed => "nsv-campaign-objective-status-completed",
-            NsvCampaignObjectiveStatus.Failed => "nsv-campaign-objective-status-failed",
-            NsvCampaignObjectiveStatus.Override => "nsv-campaign-objective-status-override",
             _ => "nsv-campaign-objective-status-inprogress"
         };
     }

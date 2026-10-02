@@ -1,5 +1,7 @@
+using Content.Server._Mono.Radar;
 using Content.Server._NSV.Bluespace.Sectors;
 using Content.Server._NSV.GameRule;
+using Content.Shared._Mono.Radar;
 using Content.Server.CartridgeLoader;
 using Content.Shared._NSV.Bluespace.Encounters;
 using Content.Shared._NSV.Bluespace.Sectors;
@@ -10,10 +12,11 @@ using Robust.Shared.Prototypes;
 
 namespace Content.Server._NSV.Bluespace.Encounters;
 
-public sealed class NsvBluespaceEncounterSystem : EntitySystem
+public sealed partial class NsvBluespaceEncounterSystem : EntitySystem
 {
     // Legacy fallback for node-less template sectors (no StarmapId): the baseline Patrol Contract.
     private static readonly ProtoId<NsvBluespaceEncounterPrototype> LegacyTemplateEncounter = "NSVPatrolContract";
+    private static readonly ProtoId<NsvBluespaceFactionPrototype> FederalFaction = "NSVFederal";
 
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
     [Dependency] private NsvCampaignRuleSystem _campaign = default!;
@@ -49,6 +52,24 @@ public sealed class NsvBluespaceEncounterSystem : EntitySystem
             return;
 
         RaiseLocalEvent(new NsvBluespaceEncounterArrivalEvent(sectorMap, shuttleUid, definitionId, definition.Kind));
+    }
+
+    /// <summary>
+    /// Kind-specific live progress of an Active encounter (targets left, hold countdown), or null when
+    /// the encounter isn't Active or its kind has nothing extra to show. Each kind system answers
+    /// <see cref="NsvBluespaceEncounterProgressEvent"/> on its own objective component.
+    /// </summary>
+    public NsvBluespaceEncounterProgressState? GetProgress(EntityUid controllerUid)
+    {
+        if (!TryComp<NsvBluespaceEncounterComponent>(controllerUid, out var encounter) ||
+            encounter.State != NsvBluespaceEncounterState.Active)
+        {
+            return null;
+        }
+
+        var ev = new NsvBluespaceEncounterProgressEvent();
+        RaiseLocalEvent(controllerUid, ref ev);
+        return ev.Progress;
     }
 
     public bool TryGetOrCreate(
@@ -252,6 +273,57 @@ public sealed class NsvBluespaceEncounterSystem : EntitySystem
     {
         if (TryComp<NsvBluespaceEncounterComponent>(controllerUid, out var encounter))
             encounter.RelationOverrides.Add(new NsvBluespaceEncounterRelationOverride(source, target));
+    }
+
+    /// <summary>
+    /// Sets NSVFederal and <paramref name="targetFaction"/> neutral to each other in the encounter's
+    /// sector (both directions), tracked on the controller so <see cref="Fail"/> / disposal roll it
+    /// back. Used by kinds where the crew hunts the targets themselves and federal AI must not steal
+    /// the kill. Returns false if either relation could not be set.
+    /// </summary>
+    public bool TryNeutralizeFederalTowards(EntityUid controllerUid, ProtoId<NsvBluespaceFactionPrototype> targetFaction)
+    {
+        if (!TryComp<NsvBluespaceEncounterComponent>(controllerUid, out var encounter))
+            return false;
+
+        foreach (var (source, target) in new[] { (FederalFaction, targetFaction), (targetFaction, FederalFaction) })
+        {
+            if (!_factions.SetSectorRelation(encounter.SectorMap, source, target, NsvBluespaceFactionRelation.Neutral))
+                return false;
+
+            TrackRelationOverride(controllerUid, source, target);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Tags <paramref name="coreUid"/> as an objective target of the encounter and marks its grid with
+    /// the red-star radar blip. The <see cref="NsvBluespaceEncounterMemberComponent"/> role is what the
+    /// fleet registry checks before parking a grid, so every kind must tag its targets through here.
+    /// </summary>
+    public void MarkObjectiveTarget(EntityUid controllerUid, EntityUid coreUid, EntityUid gridUid)
+    {
+        var member = EnsureComp<NsvBluespaceEncounterMemberComponent>(coreUid);
+        member.Controller = controllerUid;
+        member.Role = NsvBluespaceEncounterMemberRole.ObjectiveTarget;
+
+        var blip = EnsureComp<RadarBlipComponent>(gridUid);
+        blip.Config = new BlipConfig
+        {
+            Color = Color.Red,
+            Shape = RadarBlipShape.Star,
+            Bounds = new Box2(-4.5f, -4.5f, 4.5f, 4.5f),
+        };
+    }
+
+    /// <summary>
+    /// Removes an objective target's red-star blip from <paramref name="gridUid"/>, if any.
+    /// </summary>
+    public void ClearObjectiveBlip(EntityUid gridUid)
+    {
+        if (gridUid != EntityUid.Invalid)
+            RemComp<RadarBlipComponent>(gridUid);
     }
 
     public void PreDisposeSector(EntityUid sectorMap)

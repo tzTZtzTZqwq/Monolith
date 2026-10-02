@@ -8,6 +8,8 @@
 >
 > **进度速览（2026-10-02）：** ✅ S1 回合骨架 · ✅ S2 跳跃目标 · ✅ S3 三条结束条件（投票 / 旗舰被毁 Defeat / Home 抵达 Victory）· ✅ S4 击毁计分 + Home 胜利分数门禁 + Score 实时上屏 + 遭遇 Reward 权重结算（③零和按设计不做）· ✅ S5 击毁抬威胁 + 被动增长 + Threat 实时上屏 + 完成目标降威胁 · ✅ S6 遭遇类型扩充（可扩展事件分派 + Destroy / ClearSystem / Hold；Courier 待 cargo 交付信号）· ✅ S7 生成器 + faction-on-wake + 首访物化 + AI-vs-AI 抽象战斗驱动器 + 双阵营播种（舰型配比模板未做）· 🟡 S8 投票已做、extend 追加目标/抬威胁未做 · ⬜ S9/S10 延后。
 >
+> **2026-10-02 代码审查修复：** campaign 规则改为「读用 `ActiveCampaigns`、改用 `LiveCampaigns`（回合进行中且未收束）」——换局清理删旗舰/敌舰不再误判失败或计分；延长回合改为组件上的倒计时（CVar `nsv.campaign.extension_duration`，默认 3600s）随规则消亡，旧的 `Timer.Spawn` 会结束下一局；投票回调先校验规则仍存活，规则结束时取消未完成投票；所有收束路径统一置 `Phase=Ended` 并刷新面板；威胁增长走带下限的统一入口；跳到 Home 也计一次跳跃；删除无用的 `Briefing` / `Failed` / `Override` 枚举。战略层：生成间隔 ≤0 不再 NaN、生成序列化失败丢弃记录、丢失 grid 的 Live 记录降级 Missing 不再冻结抽象战斗、战斗只遍历驻留舰。
+>
 > **跨步骤遗留（非某一步的验收项）：** G7 `FuelCost` 仍只显示不扣除；「全目标→投票」与「Home 返航（有分数门禁）」两条胜利路径未互斥、投票路径不看分数；旗舰只能 admin verb 指定（无玩家主船自动进场）；击毁计分不判击杀者/阵营；campaign 目标仅 `PerformJumps` 一种。
 
 ## 1. 与 v1 的关系 / 阅读顺序
@@ -137,7 +139,9 @@
 > - **Destroy**（`NsvBluespacePatrolContractSystem`）：逻辑不变，只改为订阅到达事件。
 > - **ClearSystem**（`NsvClearSystemContractSystem`）：激活时快照节点内所有 `TargetFaction` grid 上的 AI core（`NsvEncounterClearTargetComponent` 贴 core，控制器侧 `NsvEncounterClearObjectiveComponent.RemainingTargets`），红星 blip，Federal↔Hostile 置 Neutral（经 `TrackRelationOverride` 回滚）；core `EntityTerminatingEvent` 时移出集合，空即 `TryComplete`。快照语义：激活后才生成的舰不追加；零目标 → Fail。
 > - **Hold**（`NsvHoldContractSystem`）：激活时 `EndTime = CurTime + nsv.bluespace.encounter.hold_duration`（默认 300s），**不**中和关系（敌人持续进攻）；`Update` → `CheckHolds`（internal，供测试直调）在到时且仍有参与者存在时 `TryComplete`。张力来自既有 `CanReturn` 闸：Active 期间无法 FTL 撤离。增援波次刷怪留作扩展点（注释内写明复用 `NsvBluespaceShipGenerator` 序列）。
-> - **数据：** `encounters.yml` 新增 `NSVClearSystemContract` / `NSVHoldContract`；`beta-1` 池 = `[ClearSystem, Hold]`，`alpha-3` 池追加 `ClearSystem`；loc 在 `navigation-console.ftl`（完成通知标题改为通用的 "Contract Complete"）。
+> - **数据：** `encounters.yml` 新增 `NSVClearSystemContract` / `NSVHoldContract`；`beta-1` 池 = `[ClearSystem, Hold]`，`alpha-3` 池保持 `[NSVPatrolContract]`；loc 在 `navigation-console.ftl`（完成通知标题改为通用的 "Contract Complete"）。**注意：** 节点从池里选遭遇用的是原型里固定的 `seed % pool.Count`（`NsvBluespaceSectorSystem`），**每局结果相同**——`beta-1`（seed 141）恒为 Hold，ClearSystem 目前在生产星图上抽不到。曾给 `alpha-3` 追加 ClearSystem，结果 seed 131 恒抽 ClearSystem、Patrol 从生产星图消失，已回滚。要让池子每局变化需引入每局随机盐（待决）。
+> - **导航台进度读数（2026-10-02）：** 遭遇屏新增 Progress 行。`NsvBluespaceEncounterSystem.GetProgress` 向控制器 raise `NsvBluespaceEncounterProgressEvent`，kind 系统在自己的目标组件上回答：ClearSystem 给剩余目标数，Hold 给截止时间（服务器 `CurTime`，客户端 `FrameUpdate` 本地倒计时，不必每秒推状态）。新 kind 订这个事件即可接入。
+> - **审查后修复（2026-10-02）：** ① fleet registry 的停放门禁改为同时识别 `ObjectiveTarget` 成员角色（ClearSystem 多目标不用单一 `ObjectiveTarget` 字段，之前可被停放/调走导致撤离永久锁死）；② Hold 只有星区醒着（Ready/PreparingSleep）时才判完成，船员全灭/断线致星区休眠时到点不发奖励；③ Patrol/ClearSystem 共用的「Federal 中立化」「目标标记 + 红星 blip」上移为 `TryNeutralizeFederalTowards` / `MarkObjectiveTarget` / `ClearObjectiveBlip`。
 > - **测试：** `NsvClearSystemContractSystemTest`（手工搭 2 艘敌舰——没有任何模板会生成 >1 艘敌舰；第一艘毁仍 Active，第二艘毁 → ExtractionOpen + Score+2）、`NsvHoldContractSystemTest`（Active 时 `CanReturn==false`、到时前 check 无效、到时 → ExtractionOpen + Score+2 + 可撤离）。
 >
 > 以下为原始计划，保留作对照。
@@ -210,7 +214,7 @@
 | `NsvCampaignObjective`（新建，轻量抽象） | `Status`(INPROGRESS/COMPLETED/FAILED/OVERRIDE) / `Target` / `Tally` / `Kind` | S2 | 首个实现 `PerformJumps`；照 MISSION-001 |
 | shared 回合摘要组件 / BUI 状态片段（新建） | 目标清单 + 分数 + 威胁读数 | S1/S5 | 挂现有导航控制台 / 战略图 BUI，威胁**必须可见** |
 | `NsvBluespaceEncounterPrototype`（改） | `Kind`（`NsvBluespaceEncounterKind`：Destroy/ClearSystem/Hold） | S6 | 缺省=Destroy，向后兼容 |
-| `encounters.yml`（改） | `NSVClearSystemContract` / `NSVHoldContract` + 填入节点 `encounterPool` | S6 | `alpha-3`=[Patrol, ClearSystem]，`beta-1`=[ClearSystem, Hold] |
+| `encounters.yml`（改） | `NSVClearSystemContract` / `NSVHoldContract` + 填入节点 `encounterPool` | S6 | `alpha-3`=[Patrol]，`beta-1`=[ClearSystem, Hold]（按 seed 固定抽到 Hold） |
 | `NsvCCVars`（改） | `nsv.bluespace.encounter.hold_duration`（300s） | S6 | Hold 计时 |
 | `NsvStrategyFleetSpawnerSystem` / `NsvAbstractCombatSystem`（新建，Server） | 生成节奏 / 规模系数 / perFleetSize（常量或 CVar） | S7 | registry 原语的调用方；不物化 grid |
 | 节点 YAML `Reward` / `FuelCost` | 语义升级：从「纯 BUI 显示」→ 参与计分 / （后续）扣 fuel | S4/G7 | 字段已存在，补消费逻辑 |

@@ -130,9 +130,14 @@ public sealed class NsvBluespaceNavigationCartridgeTest
             await server.WaitPost(() =>
             {
                 Assert.That(entities.GetComponent<TransformComponent>(shuttleUid).MapUid, Is.EqualTo(shuttle.MapUid));
-                Assert.That(
-                    sectors.TryDispose((sectorMap, entities.GetComponent<NsvBluespaceSectorInstanceComponent>(sectorMap))),
-                    Is.True);
+                // With no players aboard, the lifecycle scan (every 5 s, so always crossed by the waits
+                // above) moves the empty sector to PreparingSleep, which TryDispose refuses. Briefly
+                // posing a pending arrival makes the scan restore Ready, as the sibling sector tests do.
+                var sector = entities.GetComponent<NsvBluespaceSectorInstanceComponent>(sectorMap);
+                sector.PendingArrivals.Add(EntityUid.Invalid);
+                entities.System<NsvBluespaceSectorLifecycleSystem>().RefreshRegistry();
+                sector.PendingArrivals.Clear();
+                Assert.That(sectors.TryDispose((sectorMap, sector)), Is.True);
             });
             await server.WaitRunTicks(1);
             await server.WaitAssertion(() => Assert.That(entities.EntityExists(sectorMap), Is.False));

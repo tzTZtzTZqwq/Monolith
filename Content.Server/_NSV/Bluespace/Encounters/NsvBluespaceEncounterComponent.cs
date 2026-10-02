@@ -107,8 +107,5 @@ public sealed partial class NsvEncounterClearObjectiveComponent : Component
 public sealed partial class NsvEncounterHoldObjectiveComponent : Component
 {
     [ViewVariables]
-    public EntityUid Controller;
-
-    [ViewVariables]
     public TimeSpan EndTime;
 }

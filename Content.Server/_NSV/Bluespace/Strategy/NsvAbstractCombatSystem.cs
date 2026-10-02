@@ -16,7 +16,7 @@ namespace Content.Server._NSV.Bluespace.Strategy;
 /// writes data-state records via the registry — never a live grid — and never touches campaign score
 /// or threat: AI attrition between NPC factions is invisible to the player's scoreboard.
 /// </summary>
-public sealed class NsvAbstractCombatSystem : EntitySystem
+public sealed partial class NsvAbstractCombatSystem : EntitySystem
 {
     [Dependency] private NsvFleetRegistrySystem _fleets = default!;
     [Dependency] private IConfigurationManager _cfg = default!;
@@ -46,16 +46,21 @@ public sealed class NsvAbstractCombatSystem : EntitySystem
     /// </summary>
     internal void ResolveAll()
     {
+        // Walk residency, not every record: Destroyed tombstones have left residency, so a long
+        // round's accumulated dead ships cost nothing here.
         var byNode = new Dictionary<NsvFleetNodeKey, List<string>>();
-        foreach (var ship in _fleets.Ships)
+        foreach (var node in _fleets.ResidentNodes)
         {
-            if (ship.State != NsvFleetShipState.Available || ship.DataNode is not { } node)
-                continue;
+            foreach (var shipId in _fleets.GetResidentShips(node))
+            {
+                if (!_fleets.TryGetShip(shipId, out var ship) || ship.State != NsvFleetShipState.Available)
+                    continue;
 
-            if (!byNode.TryGetValue(node, out var list))
-                byNode[node] = list = new List<string>();
+                if (!byNode.TryGetValue(node, out var list))
+                    byNode[node] = list = new List<string>();
 
-            list.Add(ship.Id);
+                list.Add(shipId);
+            }
         }
 
         if (byNode.Count == 0)

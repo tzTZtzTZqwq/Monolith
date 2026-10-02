@@ -1,8 +1,9 @@
+using Content.Server.Voting;
+
 namespace Content.Server._NSV.GameRule.Components;
 
 public enum NsvCampaignPhase
 {
-    Briefing,
     Active,
     Extending,
     Ended
@@ -23,7 +24,7 @@ public enum NsvCampaignOutcome
 public sealed partial class NsvCampaignRuleComponent : Component
 {
     [ViewVariables]
-    public NsvCampaignPhase Phase = NsvCampaignPhase.Briefing;
+    public NsvCampaignPhase Phase = NsvCampaignPhase.Active;
 
     [ViewVariables]
     public NsvCampaignOutcome Outcome = NsvCampaignOutcome.None;
@@ -47,4 +48,12 @@ public sealed partial class NsvCampaignRuleComponent : Component
 
     [ViewVariables]
     public float ThreatGrowthAccumulator;
+
+    // Seconds left on a voted extension (S3/S8), or null when not extending. Counted down in
+    // ActiveTick rather than a detached timer so it dies with the rule on round restart.
+    [ViewVariables]
+    public float? ExtensionRemaining;
+
+    // The in-flight outcome vote, cancelled if the rule ends before the vote finishes.
+    public IVoteHandle? OutcomeVote;
 }

@@ -14,6 +14,7 @@ using Robust.Client.UserInterface.XAML;
 using Robust.Shared.Input;
 using Robust.Shared.Localization;
 using Robust.Shared.Maths;
+using Robust.Shared.Timing;
 
 namespace Content.Client._NSV.Bluespace.Sectors;
 
@@ -54,6 +55,8 @@ public sealed class NsvBluespaceNavigationConsoleBoundUserInterface(EntityUid ow
 [GenerateTypedNameReferences]
 public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
 {
+    [Dependency] private IGameTiming _timing = default!;
+
     private NsvBluespaceNavigationConsoleState? _state;
     private string? _selectedNodeId;
 
@@ -62,6 +65,7 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
     public NsvBluespaceNavigationConsoleWindow()
     {
         RobustXamlLoader.Load(this);
+        IoCManager.InjectDependencies(this);
 
         var group = new ButtonGroup();
         SectorModeButton.Group = group;
@@ -101,6 +105,7 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
         {
             EncounterNameValue.Text = Loc.GetString("nsv-bluespace-console-encounter-none");
             EncounterObjectiveValue.Text = "—";
+            EncounterProgressValue.Text = "—";
             EncounterStatusValue.Text = "—";
             EncounterParticipantsValue.Text = "—";
             EncounterRoleValue.Text = "—";
@@ -110,6 +115,7 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
         {
             EncounterNameValue.Text = Loc.GetString(state.EncounterName!);
             EncounterObjectiveValue.Text = Loc.GetString(state.EncounterObjective!);
+            UpdateEncounterProgress();
             EncounterStatusValue.Text = Loc.GetString(state.EncounterStatus!);
             EncounterParticipantsValue.Text = state.ParticipantCount.ToString();
             EncounterRoleValue.Text = Loc.GetString(state.IsParticipant
@@ -126,6 +132,38 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
 
         UpdateSelectedNode();
         ReturnButton.Disabled = !state.CanReturnToDeparture;
+    }
+
+    protected override void FrameUpdate(FrameEventArgs args)
+    {
+        base.FrameUpdate(args);
+
+        // Deadline-based progress (Hold) counts down locally against the synced server clock, so the
+        // server doesn't have to push a new state every second.
+        if (_state?.EncounterProgress?.Deadline != null)
+            UpdateEncounterProgress();
+    }
+
+    private void UpdateEncounterProgress()
+    {
+        var progress = _state?.EncounterProgress;
+        if (progress == null)
+        {
+            EncounterProgressValue.Text = "—";
+            return;
+        }
+
+        if (progress.Deadline is { } deadline)
+        {
+            var left = deadline - _timing.CurTime;
+            if (left < TimeSpan.Zero)
+                left = TimeSpan.Zero;
+
+            EncounterProgressValue.Text = Loc.GetString(progress.LabelLoc, ("time", left.ToString(@"mm\:ss")));
+            return;
+        }
+
+        EncounterProgressValue.Text = Loc.GetString(progress.LabelLoc, ("count", progress.Count ?? 0));
     }
 
     private void UpdateCampaign(NsvCampaignSummaryState? campaign)

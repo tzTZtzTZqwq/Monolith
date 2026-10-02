@@ -22,7 +22,7 @@ namespace Content.Server._NSV.Bluespace.Strategy;
 /// must never be constructed elsewhere. Fleet grouping and scheduling belong to the
 /// strategy system and are out of scope here.
 /// </summary>
-public sealed class NsvFleetRegistrySystem : EntitySystem
+public sealed partial class NsvFleetRegistrySystem : EntitySystem
 {
     [Dependency] private MapSystem _map = default!;
     [Dependency] private SharedTransformSystem _transform = default!;
@@ -119,6 +119,28 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
         return _residency.TryGetValue(node, out var ships)
             ? ships
             : (IReadOnlyCollection<string>) System.Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Every node that currently has at least one resident ship. Lets per-node passes (abstract
+    /// combat) walk only resident ships instead of every record ever made — Destroyed tombstones
+    /// leave residency, so they are never visited.
+    /// </summary>
+    public IReadOnlyCollection<NsvFleetNodeKey> ResidentNodes => _residency.Keys;
+
+    /// <summary>
+    /// Forgets a ship whose creation was aborted before it ever became a valid record (e.g. a spawn
+    /// whose serialize failed): drops its residency and the record itself. Does not touch the grid;
+    /// the caller owns cleaning that up. Unlike <see cref="TryDestroyDataShip"/> this leaves no
+    /// tombstone — the ship never existed as far as the strategy layer is concerned.
+    /// </summary>
+    public void DiscardShip(string shipId)
+    {
+        if (!_ships.TryGetValue(shipId, out var ship))
+            return;
+
+        SetResidency(ship, null);
+        _ships.Remove(shipId);
     }
 
     /// <summary>
@@ -366,6 +388,25 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
                 failure = $"Ship '{ship.Id}' is {ship.RepresentationFailure}.";
                 return false;
             }
+        }
+
+        // Multi-target kinds (ClearSystem) don't use the single ObjectiveTarget field; every kind tags
+        // its targets with an ObjectiveTarget member role instead. Moving such a grid away would leave
+        // the objective unreachable and the crew's extraction locked for good.
+        var members = EntityQueryEnumerator<NsvBluespaceEncounterMemberComponent, TransformComponent>();
+        while (members.MoveNext(out _, out var member, out var xform))
+        {
+            if (xform.GridUid != gridUid ||
+                member.Role != NsvBluespaceEncounterMemberRole.ObjectiveTarget ||
+                !TryComp<NsvBluespaceEncounterComponent>(member.Controller, out var owner) ||
+                owner.State is NsvBluespaceEncounterState.Failed or NsvBluespaceEncounterState.Disposed)
+            {
+                continue;
+            }
+
+            ship.RepresentationFailure = $"referenced as encounter objective ({owner.DefinitionId})";
+            failure = $"Ship '{ship.Id}' is {ship.RepresentationFailure}.";
+            return false;
         }
 
         ship.RepresentationFailure = null;
@@ -667,8 +708,14 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
     {
         foreach (var shipId in GetResidentShips(node))
         {
-            if (_ships.TryGetValue(shipId, out var ship) && ship.State == NsvFleetShipState.Live)
+            // A Live record whose grid is gone is stale, not live authority: GridIsBound demotes it
+            // to Missing so it stops freezing combat at this node for the rest of the round.
+            if (_ships.TryGetValue(shipId, out var ship) &&
+                ship.State == NsvFleetShipState.Live &&
+                GridIsBound(ship, out _))
+            {
                 return false;
+            }
         }
 
         var query = EntityQueryEnumerator<NsvBluespaceEncounterComponent>();

@@ -1,4 +1,5 @@
 using Content.Shared._NSV.Bluespace.Encounters;
+using Content.Shared._NSV.Bluespace.Sectors;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Prototypes;
 
@@ -30,3 +31,11 @@ public sealed class NsvBluespaceEncounterArrivalEvent : EntityEventArgs
         Kind = kind;
     }
 }
+
+/// <summary>
+/// Raised directed at an Active encounter's controller to collect its kind-specific progress readout
+/// for the navigation console. The kind system that owns the controller's objective component fills
+/// <see cref="Progress"/>; kinds with nothing extra to show (Destroy) leave it null.
+/// </summary>
+[ByRefEvent]
+public record struct NsvBluespaceEncounterProgressEvent(NsvBluespaceEncounterProgressState? Progress = null);

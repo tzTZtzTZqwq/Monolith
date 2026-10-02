@@ -61,8 +61,13 @@ public sealed partial class NsvStrategyFleetSpawnerSystem : EntitySystem
 
     public override void Update(float frameTime)
     {
-        _accumulator += frameTime;
+        // interval <= 0 disables spawning. Checked before accumulating: `% 0` would poison the
+        // accumulator with NaN and spawn every tick even after the CVar is restored.
         var interval = _cfg.GetCVar(NsvCCVars.StrategyFleetSpawnInterval);
+        if (interval <= 0f)
+            return;
+
+        _accumulator += frameTime;
         if (_accumulator < interval)
             return;
 
@@ -97,7 +102,9 @@ public sealed partial class NsvStrategyFleetSpawnerSystem : EntitySystem
         var threatPerShip = _cfg.GetCVar(NsvCCVars.StrategyFleetThreatPerShip);
         var maxPerNode = _cfg.GetCVar(NsvCCVars.StrategyFleetMaxPerNode);
         var garrisonSize = _cfg.GetCVar(NsvCCVars.StrategyFederalGarrisonSize);
-        var threatBonus = threatPerShip > 0f ? (int) MathF.Round(threat / threatPerShip) : 0;
+        var threatBonus = threatPerShip > 0f
+            ? (int) MathF.Round(threat / threatPerShip, MidpointRounding.AwayFromZero)
+            : 0;
         var hostileTarget = Math.Clamp(baseline + threatBonus, 0, maxPerNode);
 
         foreach (var node in starmap.NodeDefinitions)
@@ -171,7 +178,9 @@ public sealed partial class NsvStrategyFleetSpawnerSystem : EntitySystem
     /// Spawns one <paramref name="faction"/> ship straight into the data state, reusing the
     /// sector-monitor spawn sequence: load the grid onto a fresh paused scratch map, register it as
     /// a ship resident at <paramref name="key"/>, serialize it onto the holding map, then discard
-    /// the scratch map.
+    /// the scratch map. If serialization fails the record is discarded too: the grid dies with the
+    /// scratch map, and a leftover Live record would otherwise freeze abstract combat at the node and
+    /// be re-spawned on top of every pass.
     /// </summary>
     private void SpawnDataShip(NsvFleetNodeKey key, string faction)
     {
@@ -180,13 +189,20 @@ public sealed partial class NsvStrategyFleetSpawnerSystem : EntitySystem
         try
         {
             if (!_mapLoader.TryLoadGrid(scratch, DataShipGridPath, out var grid))
+            {
+                Log.Error($"Could not load data ship grid '{DataShipGridPath}' for {faction} at {key}.");
                 return;
+            }
 
             var ship = _fleets.RegisterShip(grid.Value.Owner, DataShipGridPath, key);
             // Tag the intended faction now; it's applied on wake (OnShipInstantiated), once the
             // grid is on a faction-enabled sector map — the holding map has no faction.
             ship.Faction = faction;
-            _fleets.TrySerializeShip(ship.Id, out _);
+            if (!_fleets.TrySerializeShip(ship.Id, out var failure))
+            {
+                Log.Warning($"Discarding data ship {ship.Id} for {faction} at {key}: {failure}");
+                _fleets.DiscardShip(ship.Id);
+            }
         }
         finally
         {

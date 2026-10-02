@@ -173,6 +173,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         var encounterStatus = default(string);
         var participantCount = 0;
         var hasEncounter = false;
+        NsvBluespaceEncounterProgressState? encounterProgress = null;
         NsvBluespaceEncounterComponent? encounter = null;
         if (sector != null &&
             sector.EncounterController != EntityUid.Invalid &&
@@ -191,6 +192,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             participantCount = encounter.Participants.Count;
             isParticipant = shuttleUid != null && encounter.Participants.Contains(shuttleUid.Value);
             canExtract = isParticipant && encounter.State is NsvBluespaceEncounterState.ExtractionOpen or NsvBluespaceEncounterState.Failed;
+            encounterProgress = _encounters.GetProgress(sector!.EncounterController);
         }
 
         var canLeaveCurrentNode = sector != null &&
@@ -216,7 +218,8 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             starmapNodes,
             currentNodeId,
             canReturnToDeparture,
-            _campaign.TryBuildSummary());
+            _campaign.TryBuildSummary(),
+            encounterProgress);
     }
 
     private List<NsvBluespaceStarmapNodeState> BuildStarmapNodes(

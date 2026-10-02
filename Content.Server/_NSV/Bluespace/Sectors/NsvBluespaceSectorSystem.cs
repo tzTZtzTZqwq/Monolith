@@ -232,13 +232,17 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
                 }
             }
 
-            _mapManager.DoMapInitialize(mapId);
+            // Initialize without unpausing so the fleet below lands before the map simulates.
+            _map.InitializeMap(mapId, unpause: false);
 
             // First materialization also pulls in the background fleet the strategy layer
             // accumulated at this node while it was unvisited data. Mirrors the wake path
             // (instantiate while still paused, before unpause); ships fan out around the
             // anchor via FindFreeSpot so they don't stack on generated content. Resident
-            // ships are additive to the encounter's own generated ships.
+            // ships are additive to the encounter's own generated ships. If this throws, the
+            // catch below deletes the map with any ships already flipped Live; those stale
+            // records are demoted to Missing by the registry's bound-grid check, so they can't
+            // freeze abstract combat at this node.
             _fleets.InstantiateNodeFleets(
                 new Strategy.NsvFleetNodeKey(starmapId, nodeId),
                 new EntityCoordinates(mapUid, Vector2.Zero),

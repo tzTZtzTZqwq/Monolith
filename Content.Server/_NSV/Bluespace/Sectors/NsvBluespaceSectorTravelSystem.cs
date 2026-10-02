@@ -345,10 +345,12 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         CompleteArrival(ev.Entity, ev.MapUid);
         _factions.SetFaction(ev.Entity, PlayerFaction);
         _encounters.DispatchArrival(ev.MapUid, ev.Entity);
+
+        // A jump home is still a jump. Count it first: if it completes the objectives, the outcome
+        // vote takes over and the Home victory check then sees a decided campaign and stands down.
+        _campaign.NotifyJumpArrived();
         if (IsHomeNode(sector))
             _campaign.NotifyHomeArrival();
-        else
-            _campaign.NotifyJumpArrived();
         NotifySectorChanged(ev.MapUid);
         NotifyShuttleChanged(ev.Entity);
     }

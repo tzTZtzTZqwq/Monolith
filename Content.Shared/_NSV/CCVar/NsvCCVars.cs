@@ -42,7 +42,9 @@ public sealed class NsvCCVars
         CVarDef.Create("nsv.bluespace.strategy.fleet_threat_per_ship", 5f, CVar.SERVERONLY | CVar.ARCHIVE);
 
     /// <summary>
-    /// Hard cap on the number of strategy ships spawned per hostile node.
+    /// Hard cap on the hostile (NSVHostile) strategy fleet per node. Federal front-line nodes also
+    /// hold a separate garrison (<see cref="StrategyFederalGarrisonSize"/>) on top of this, so their
+    /// total can exceed it.
     /// </summary>
     public static readonly CVarDef<int> StrategyFleetMaxPerNode =
         CVarDef.Create("nsv.bluespace.strategy.fleet_max_per_node", 4, CVar.SERVERONLY | CVar.ARCHIVE);
@@ -99,6 +101,13 @@ public sealed class NsvCCVars
     /// </summary>
     public static readonly CVarDef<float> CampaignObjectiveThreatNegation =
         CVarDef.Create("nsv.campaign.objective_threat_negation", 3f, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// How long, in seconds, the round runs on after the crew votes to press on (S3). Read when the
+    /// vote passes; the countdown dies with the rule, so it never ends a later round.
+    /// </summary>
+    public static readonly CVarDef<float> CampaignExtensionDuration =
+        CVarDef.Create("nsv.campaign.extension_duration", 3600f, CVar.SERVERONLY | CVar.ARCHIVE);
 
     /// <summary>
     /// Seconds a Hold encounter requires the crew to survive in a hostile node before it completes.

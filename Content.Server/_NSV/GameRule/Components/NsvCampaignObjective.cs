@@ -3,9 +3,7 @@ namespace Content.Server._NSV.GameRule.Components;
 public enum NsvCampaignObjectiveStatus
 {
     InProgress,
-    Completed,
-    Failed,
-    Override
+    Completed
 }
 
 public enum NsvCampaignObjectiveKind

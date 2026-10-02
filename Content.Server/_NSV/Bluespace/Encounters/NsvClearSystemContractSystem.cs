@@ -1,7 +1,5 @@
 using System.Linq;
-using Content.Server._Mono.Radar;
 using Content.Server._NSV.Bluespace.Sectors;
-using Content.Shared._Mono.Radar;
 using Content.Shared._NSV.Bluespace.Encounters;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Robust.Shared.GameObjects;
@@ -16,11 +14,8 @@ namespace Content.Server._NSV.Bluespace.Encounters;
 /// the node afterwards are not added (v1). Completion/reward/notification are owned by
 /// <see cref="NsvBluespaceEncounterSystem"/>; this system only decides when the win condition is met.
 /// </summary>
-public sealed class NsvClearSystemContractSystem : EntitySystem
+public sealed partial class NsvClearSystemContractSystem : EntitySystem
 {
-    private static readonly ProtoId<NsvBluespaceFactionPrototype> FederalFaction = "NSVFederal";
-    private static readonly ProtoId<NsvBluespaceFactionPrototype> HostileFaction = "NSVHostile";
-
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
@@ -29,6 +24,14 @@ public sealed class NsvClearSystemContractSystem : EntitySystem
     {
         SubscribeLocalEvent<NsvBluespaceEncounterArrivalEvent>(OnArrival);
         SubscribeLocalEvent<NsvEncounterClearTargetComponent, EntityTerminatingEvent>(OnClearTargetTerminating);
+        SubscribeLocalEvent<NsvEncounterClearObjectiveComponent, NsvBluespaceEncounterProgressEvent>(OnProgress);
+    }
+
+    private void OnProgress(EntityUid uid, NsvEncounterClearObjectiveComponent objective, ref NsvBluespaceEncounterProgressEvent args)
+    {
+        args.Progress = new NsvBluespaceEncounterProgressState(
+            "nsv-bluespace-encounter-progress-remaining",
+            count: objective.RemainingTargets.Count);
     }
 
     private void OnArrival(NsvBluespaceEncounterArrivalEvent ev)
@@ -80,34 +83,16 @@ public sealed class NsvClearSystemContractSystem : EntitySystem
         if (cores.Count == 0)
             return false;
 
-        if (!_factions.SetSectorRelation(encounter.SectorMap, FederalFaction, HostileFaction, NsvBluespaceFactionRelation.Neutral))
+        if (!_encounters.TryNeutralizeFederalTowards(controllerUid, definition.TargetFaction))
             return false;
-
-        _encounters.TrackRelationOverride(controllerUid, FederalFaction, HostileFaction);
-        if (!_factions.SetSectorRelation(encounter.SectorMap, HostileFaction, FederalFaction, NsvBluespaceFactionRelation.Neutral))
-            return false;
-
-        _encounters.TrackRelationOverride(controllerUid, HostileFaction, FederalFaction);
 
         var objective = EnsureComp<NsvEncounterClearObjectiveComponent>(controllerUid);
         foreach (var (coreUid, gridUid) in cores)
         {
-            var member = EnsureComp<NsvBluespaceEncounterMemberComponent>(coreUid);
-            member.Controller = controllerUid;
-            member.Role = NsvBluespaceEncounterMemberRole.ObjectiveTarget;
-
+            _encounters.MarkObjectiveTarget(controllerUid, coreUid, gridUid);
             var target = EnsureComp<NsvEncounterClearTargetComponent>(coreUid);
             target.Controller = controllerUid;
             target.BlipGrid = gridUid;
-
-            var blip = EnsureComp<RadarBlipComponent>(gridUid);
-            blip.Config = new BlipConfig
-            {
-                Color = Color.Red,
-                Shape = RadarBlipShape.Star,
-                Bounds = new Box2(-4.5f, -4.5f, 4.5f, 4.5f),
-            };
-
             objective.RemainingTargets.Add(coreUid);
         }
 
@@ -133,8 +118,7 @@ public sealed class NsvClearSystemContractSystem : EntitySystem
         if (!objective.RemainingTargets.Remove(uid))
             return;
 
-        if (target.BlipGrid != EntityUid.Invalid)
-            RemComp<RadarBlipComponent>(target.BlipGrid);
+        _encounters.ClearObjectiveBlip(target.BlipGrid);
 
         if (objective.RemainingTargets.Count > 0)
         {

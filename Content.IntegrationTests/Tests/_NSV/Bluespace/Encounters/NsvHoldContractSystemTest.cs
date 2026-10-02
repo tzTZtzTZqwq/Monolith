@@ -14,7 +14,8 @@ public sealed class NsvHoldContractSystemTest
     /// <summary>
     /// A Hold contract keeps extraction gated (<see cref="NsvBluespaceEncounterSystem.CanReturn"/>
     /// false) for the whole Active window, then completes and awards the node reward once its timer
-    /// elapses. CheckHolds is driven directly so the test needn't pump a real hold duration of ticks.
+    /// elapses with the sector still held (awake). CheckHolds is driven directly so the test needn't
+    /// pump a real hold duration of ticks.
     /// </summary>
     [Test]
     public async Task HoldGatesExtractionUntilTimerElapses()
@@ -61,6 +62,8 @@ public sealed class NsvHoldContractSystemTest
             {
                 Assert.That(encounter.State, Is.EqualTo(NsvBluespaceEncounterState.Active));
                 Assert.That(objective.EndTime, Is.GreaterThan(timing.CurTime), "the hold timer runs into the future");
+                Assert.That(encounters.GetProgress(controllerUid)?.Deadline, Is.EqualTo(objective.EndTime),
+                    "the console counts down to the hold deadline");
                 // Active hold blocks FTL extraction: that gate is the entire tension of the encounter.
                 Assert.That(encounters.CanReturn(sectorMap.MapUid, shuttleUid, out _), Is.False);
             });
@@ -73,8 +76,20 @@ public sealed class NsvHoldContractSystemTest
                 Assert.That(campaign.TryBuildSummary()!.Score, Is.EqualTo(0));
             });
 
-            // Advance the deadline into the past and re-check: the hold is satisfied.
+            // Deadline passes while the sector sleeps (the crew died or disconnected): nobody is
+            // holding, so it must not pay out. The hold stays Active for a returning crew.
             objective.EndTime = timing.CurTime - TimeSpan.FromSeconds(1);
+            sector.State = NsvBluespaceSectorState.Sleeping;
+            hold.CheckHolds();
+            Assert.Multiple(() =>
+            {
+                Assert.That(encounter.State, Is.EqualTo(NsvBluespaceEncounterState.Active));
+                Assert.That(campaign.TryBuildSummary()!.Score, Is.EqualTo(0),
+                    "an unattended hold does not award the reward");
+            });
+
+            // The crew is back (sector awake) with the deadline passed: the hold is satisfied.
+            sector.State = NsvBluespaceSectorState.Ready;
             hold.CheckHolds();
             Assert.Multiple(() =>
             {

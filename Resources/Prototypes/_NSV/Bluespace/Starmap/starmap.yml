@@ -65,7 +65,6 @@
     fuelCost: 2
     encounterPool:
     - NSVPatrolContract
-    - NSVClearSystemContract
     connections:
     - alpha-2
     - beta-1

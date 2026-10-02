@@ -182,6 +182,12 @@
                                                    HorizontalExpand="True"
                                                    Align="Right"
                                                    FontColorOverride="#00ff2a"/>
+                                            <Label Text="{Loc 'nsv-bluespace-console-caption-progress'}" FontColorOverride="#00ff2a"/>
+                                            <Label Name="EncounterProgressValue"
+                                                   Text="—"
+                                                   HorizontalExpand="True"
+                                                   Align="Right"
+                                                   FontColorOverride="#00ff2a"/>
                                             <Label Text="{Loc 'nsv-bluespace-console-caption-status'}" FontColorOverride="#00ff2a"/>
                                             <Label Name="EncounterStatusValue"
                                                    Text="—"

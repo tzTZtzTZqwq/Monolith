@@ -124,6 +124,7 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
     public readonly string? CurrentNodeId;
     public readonly bool CanReturnToDeparture;
     public readonly NsvCampaignSummaryState? Campaign;
+    public readonly NsvBluespaceEncounterProgressState? EncounterProgress;
 
     public NsvBluespaceNavigationConsoleState(
         string sectorName,
@@ -141,7 +142,8 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         List<NsvBluespaceStarmapNodeState>? starmapNodes = null,
         string? currentNodeId = null,
         bool canReturnToDeparture = false,
-        NsvCampaignSummaryState? campaign = null)
+        NsvCampaignSummaryState? campaign = null,
+        NsvBluespaceEncounterProgressState? encounterProgress = null)
     {
         SectorName = sectorName;
         SectorDescription = sectorDescription;
@@ -159,5 +161,27 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         CurrentNodeId = currentNodeId;
         CanReturnToDeparture = canReturnToDeparture;
         Campaign = campaign;
+        EncounterProgress = encounterProgress;
+    }
+}
+
+/// <summary>
+/// Kind-specific live progress of an active encounter, e.g. targets remaining (ClearSystem) or the
+/// moment extraction unlocks (Hold). <see cref="LabelLoc"/> is formatted with <c>$count</c> when
+/// <see cref="Count"/> is set and with <c>$time</c> (mm:ss left) when <see cref="Deadline"/> is set;
+/// the deadline is in server <c>CurTime</c> so the client can count down without new states.
+/// </summary>
+[Serializable, NetSerializable]
+public sealed class NsvBluespaceEncounterProgressState
+{
+    public readonly string LabelLoc;
+    public readonly int? Count;
+    public readonly TimeSpan? Deadline;
+
+    public NsvBluespaceEncounterProgressState(string labelLoc, int? count = null, TimeSpan? deadline = null)
+    {
+        LabelLoc = labelLoc;
+        Count = count;
+        Deadline = deadline;
     }
 }

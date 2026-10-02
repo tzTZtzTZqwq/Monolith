@@ -750,6 +750,49 @@ public sealed class NsvFleetRegistrySystemTest
         await pair.CleanReturnAsync();
     }
 
+    /// <summary>
+    /// A Live record whose grid has vanished (e.g. a spawn or first-visit materialization that failed
+    /// and deleted its map) must not freeze abstract combat at its node forever: the combat gate
+    /// demotes it to Missing. An aborted record can also be discarded outright, leaving no trace.
+    /// </summary>
+    [Test]
+    public async Task StaleLiveRecordDoesNotBlockCombatAndCanBeDiscarded()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            var node = new NsvFleetNodeKey("test-starmap", "stale-live");
+            var grid = mapManager.CreateGridEntity(testMap.MapId).Owner;
+            var stale = fleets.RegisterShip(grid, new ResPath("/Maps/_NSV/test.yml"), node);
+            Assert.That(fleets.CanResolveAbstractCombat(node), Is.False, "a bound Live ship blocks combat");
+
+            entityManager.DeleteEntity(grid);
+            Assert.Multiple(() =>
+            {
+                Assert.That(fleets.CanResolveAbstractCombat(node), Is.True, "a grid-less Live record no longer blocks");
+                Assert.That(stale.State, Is.EqualTo(NsvFleetShipState.Missing));
+            });
+
+            var discardNode = new NsvFleetNodeKey("test-starmap", "discarded");
+            var aborted = fleets.RegisterShip(mapManager.CreateGridEntity(testMap.MapId).Owner,
+                new ResPath("/Maps/_NSV/test.yml"), discardNode);
+            fleets.DiscardShip(aborted.Id);
+            Assert.Multiple(() =>
+            {
+                Assert.That(fleets.TryGetShip(aborted.Id, out _), Is.False);
+                Assert.That(fleets.GetResidentShips(discardNode), Is.Empty);
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
     private static int CountGridFloors(IEntityManager entityManager, SharedMapSystem mapSystem, EntityUid gridUid)
     {
         var grid = entityManager.GetComponent<MapGridComponent>(gridUid);

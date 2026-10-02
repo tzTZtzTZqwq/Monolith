@@ -1,7 +1,5 @@
 using System.Linq;
-using Content.Server._Mono.Radar;
 using Content.Server._NSV.Bluespace.Sectors;
-using Content.Shared._Mono.Radar;
 using Content.Shared._NSV.Bluespace.Encounters;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Robust.Shared.GameObjects;
@@ -9,11 +7,8 @@ using Robust.Shared.Prototypes;
 
 namespace Content.Server._NSV.Bluespace.Encounters;
 
-public sealed class NsvBluespacePatrolContractSystem : EntitySystem
+public sealed partial class NsvBluespacePatrolContractSystem : EntitySystem
 {
-    private static readonly ProtoId<NsvBluespaceFactionPrototype> FederalFaction = "NSVFederal";
-    private static readonly ProtoId<NsvBluespaceFactionPrototype> HostileFaction = "NSVHostile";
-
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
@@ -58,29 +53,13 @@ public sealed class NsvBluespacePatrolContractSystem : EntitySystem
             return false;
         }
 
-        if (!_factions.SetSectorRelation(encounter.SectorMap, FederalFaction, HostileFaction, NsvBluespaceFactionRelation.Neutral))
+        if (!_encounters.TryNeutralizeFederalTowards(controllerUid, definition.TargetFaction))
             return false;
 
-        _encounters.TrackRelationOverride(controllerUid, FederalFaction, HostileFaction);
-        if (!_factions.SetSectorRelation(encounter.SectorMap, HostileFaction, FederalFaction, NsvBluespaceFactionRelation.Neutral))
-            return false;
-
-        _encounters.TrackRelationOverride(controllerUid, HostileFaction, FederalFaction);
-
-        var member = EnsureComp<NsvBluespaceEncounterMemberComponent>(targetCore);
-        member.Controller = controllerUid;
-        member.Role = NsvBluespaceEncounterMemberRole.ObjectiveTarget;
-
+        _encounters.MarkObjectiveTarget(controllerUid, targetCore, targetGrid);
         var objective = EnsureComp<NsvEncounterPatrolCoreObjectiveComponent>(targetCore);
         objective.Controller = controllerUid;
         objective.BlipGrid = targetGrid;
-        var blip = EnsureComp<RadarBlipComponent>(targetGrid);
-        blip.Config = new BlipConfig
-        {
-            Color = Color.Red,
-            Shape = RadarBlipShape.Star,
-            Bounds = new Box2(-4.5f, -4.5f, 4.5f, 4.5f),
-        };
 
         encounter.ObjectiveTarget = targetCore;
         encounter.State = NsvBluespaceEncounterState.Active;
@@ -102,11 +81,8 @@ public sealed class NsvBluespacePatrolContractSystem : EntitySystem
             return;
         }
 
-        if (!_encounters.TryCompleteObjective(objective.Controller, uid))
-            return;
-
-        if (objective.BlipGrid != EntityUid.Invalid)
-            RemComp<RadarBlipComponent>(objective.BlipGrid);
+        if (_encounters.TryCompleteObjective(objective.Controller, uid))
+            _encounters.ClearObjectiveBlip(objective.BlipGrid);
     }
 
     private bool TryFindPatrolCore(EntityUid sectorMap, EntityUid gridUid, out EntityUid coreUid)

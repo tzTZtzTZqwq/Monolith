@@ -64,6 +64,44 @@ public sealed class NsvStrategyFleetSpawnerTest
         await pair.CleanReturnAsync();
     }
 
+    /// <summary>
+    /// An interval of 0 disables the spawner. It used to divide the accumulator by zero (NaN), after
+    /// which every tick ran a spawn pass until the server restarted.
+    /// </summary>
+    [Test]
+    public async Task ZeroIntervalDisablesSpawning()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var sysMan = server.ResolveDependency<IEntitySystemManager>();
+        var cfg = server.ResolveDependency<IConfigurationManager>();
+        var gameTicker = sysMan.GetEntitySystem<GameTicker>();
+        var fleets = sysMan.GetEntitySystem<NsvFleetRegistrySystem>();
+        var before = 0;
+
+        await server.WaitAssertion(() =>
+        {
+            cfg.SetCVar(NsvCCVars.StrategyFleetSpawnInterval, 0f);
+            Assert.That(gameTicker.StartGameRule("NsvCampaign"), Is.True);
+            before = fleets.Ships.Count;
+        });
+
+        await server.WaitRunTicks(10);
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(fleets.Ships.Count, Is.EqualTo(before), "interval 0 must not spawn anything");
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
     [Test]
     public async Task DoesNotSpawnAtMaterializedNode()
     {

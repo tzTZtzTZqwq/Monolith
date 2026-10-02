@@ -7,6 +7,7 @@ nsv-bluespace-console-caption-status = Status
 nsv-bluespace-console-caption-assets = Assets
 nsv-bluespace-console-caption-contract = Contract
 nsv-bluespace-console-caption-objective = Objective
+nsv-bluespace-console-caption-progress = Progress
 nsv-bluespace-console-caption-participants = Participants
 nsv-bluespace-console-caption-role = Role
 nsv-bluespace-console-caption-extraction = Extraction
@@ -57,6 +58,11 @@ nsv-bluespace-encounter-clearsystem-name = Clear System Contract
 nsv-bluespace-encounter-clearsystem-objective = Destroy every hostile AI core in this system.
 nsv-bluespace-encounter-hold-name = Hold Contract
 nsv-bluespace-encounter-hold-objective = Hold position under fire until the contract timer elapses.
+nsv-bluespace-encounter-progress-remaining = { $count } { $count ->
+    [one] target
+   *[other] targets
+} remaining
+nsv-bluespace-encounter-progress-hold = { $time } until extraction
 nsv-bluespace-console-starmap-header = Strategic Starmap
 nsv-bluespace-starmap-name = Local Bluespace Route
 nsv-bluespace-starmap-description = A fixed chart of routes, contacts, and unexplored signals beyond the departure map.
@@ -122,12 +128,9 @@ nsv-campaign-caption-score = Score
 nsv-campaign-caption-threat = Threat
 nsv-campaign-objectives-header = Objectives
 nsv-campaign-objective-progress = { $status } ({ $tally }/{ $target })
-nsv-campaign-phase-briefing = Briefing
 nsv-campaign-phase-active = Active
 nsv-campaign-phase-extending = Extending
 nsv-campaign-phase-ended = Ended
 nsv-campaign-objective-performjumps = Perform bluespace jumps
 nsv-campaign-objective-status-inprogress = In progress
 nsv-campaign-objective-status-completed = Completed
-nsv-campaign-objective-status-failed = Failed
-nsv-campaign-objective-status-override = Overridden

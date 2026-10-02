@@ -121,8 +121,10 @@ public sealed class NsvBluespaceStarmapSystemTest
                     Is.EqualTo(NsvBluespaceEncounterState.ExtractionOpen));
             });
 
+            // charlie-4 has an empty encounter pool, so arriving there leaves extraction open. (beta-1
+            // would work for the edge check above but now hosts a Hold contract that gates return.)
             await server.WaitPost(() =>
-                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "beta-1", out var reason), Is.True, reason));
+                Assert.That(travel.TryTravelToNode(shuttleUid, StarmapId, "charlie-4", out var reason), Is.True, reason));
             await pair.RunSeconds(11);
             await server.WaitAssertion(() =>
             {
@@ -130,8 +132,8 @@ public sealed class NsvBluespaceStarmapSystemTest
                 var asteroid = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(asteroidMapUid);
                 Assert.Multiple(() =>
                 {
-                    Assert.That(asteroid.NodeId, Is.EqualTo("beta-1"));
-                    Assert.That(asteroid.TemplateId, Is.EqualTo("NSVBluespaceHunterSector"));
+                    Assert.That(asteroid.NodeId, Is.EqualTo("charlie-4"));
+                    Assert.That(asteroid.TemplateId, Is.EqualTo("NSVBluespaceAsteroidSector"));
                     Assert.That(asteroid.EncounterController, Is.EqualTo(EntityUid.Invalid));
                     Assert.That(asteroid.ForeignGrids, Does.Contain(shuttleUid));
                     Assert.That(asteroid.ReturnDestinations, Does.ContainKey(shuttleUid));

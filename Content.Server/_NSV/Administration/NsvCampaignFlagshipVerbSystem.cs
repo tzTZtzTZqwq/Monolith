@@ -15,11 +15,11 @@ namespace Content.Server._NSV.Administration;
 /// automatic player-ship entry. Unlike the faction verbs this does not resolve to the grid — it
 /// marks the exact entity clicked, so a specific console can be the flagship.
 /// </summary>
-public sealed class NsvCampaignFlagshipVerbSystem : EntitySystem
+public sealed partial class NsvCampaignFlagshipVerbSystem : EntitySystem
 {
-    [Dependency] private readonly IAdminManager _admin = default!;
-    [Dependency] private readonly NsvCampaignRuleSystem _campaign = default!;
-    [Dependency] private readonly SharedPopupSystem _popup = default!;
+    [Dependency] private IAdminManager _admin = default!;
+    [Dependency] private NsvCampaignRuleSystem _campaign = default!;
+    [Dependency] private SharedPopupSystem _popup = default!;
 
     private static readonly SpriteSpecifier VerbIcon =
         new SpriteSpecifier.Texture(new("/Textures/Interface/gavel.svg.192dpi.png"));

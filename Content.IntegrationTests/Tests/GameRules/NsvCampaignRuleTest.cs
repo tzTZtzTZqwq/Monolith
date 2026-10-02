@@ -343,4 +343,149 @@ public sealed class NsvCampaignRuleTest
 
         await pair.CleanReturnAsync();
     }
+
+    /// <summary>
+    ///     An "extend" vote keeps the round going for the configured extension, after which the
+    ///     campaign concludes and the round ends. A tie or "end" result ends the round straight away.
+    /// </summary>
+    [Test]
+    public async Task ExtensionRunsOutAndEndsRound()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var cfg = server.ResolveDependency<IConfigurationManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var campaign = entityManager.System<NsvCampaignRuleSystem>();
+        var ruleUid = EntityUid.Invalid;
+
+        await server.WaitAssertion(() =>
+        {
+            cfg.SetCVar(NsvCCVars.CampaignExtensionDuration, 0.2f);
+            Assert.That(gameTicker.StartGameRule("NsvCampaign", out ruleUid), Is.True);
+
+            campaign.ApplyOutcomeVoteResult(ruleUid, "extend");
+            var rule = entityManager.GetComponent<NsvCampaignRuleComponent>(ruleUid);
+            Assert.Multiple(() =>
+            {
+                Assert.That(rule.Phase, Is.EqualTo(NsvCampaignPhase.Extending));
+                Assert.That(gameTicker.RunLevel, Is.EqualTo(GameRunLevel.InRound));
+            });
+        });
+
+        await server.WaitRunTicks(30);
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(entityManager.GetComponent<NsvCampaignRuleComponent>(ruleUid).Phase,
+                    Is.EqualTo(NsvCampaignPhase.Ended));
+                Assert.That(gameTicker.RunLevel, Is.EqualTo(GameRunLevel.PostRound),
+                    "the extension running out ends the round");
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    ///     Round-restart safety: once the campaign rule has ended, neither a pending extension nor a
+    ///     late vote result may touch the round that follows. (The old detached 60-minute timer would
+    ///     have ended whatever round was running when it fired.)
+    /// </summary>
+    [Test]
+    public async Task EndedRuleIgnoresExtensionAndLateVote()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var cfg = server.ResolveDependency<IConfigurationManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var campaign = entityManager.System<NsvCampaignRuleSystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            cfg.SetCVar(NsvCCVars.CampaignExtensionDuration, 0.2f);
+            Assert.That(gameTicker.StartGameRule("NsvCampaign", out var extendedRule), Is.True);
+            campaign.ApplyOutcomeVoteResult(extendedRule, "extend");
+            Assert.That(gameTicker.EndGameRule(extendedRule), Is.True);
+
+            // A second campaign whose vote resolves only after its rule has already ended.
+            Assert.That(gameTicker.StartGameRule("NsvCampaign", out var votingRule), Is.True);
+            Assert.That(gameTicker.EndGameRule(votingRule), Is.True);
+            campaign.ApplyOutcomeVoteResult(votingRule, "end");
+
+            Assert.That(gameTicker.RunLevel, Is.EqualTo(GameRunLevel.InRound),
+                "a vote resolving after its rule ended does not end the round");
+        });
+
+        await server.WaitRunTicks(30);
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(gameTicker.RunLevel, Is.EqualTo(GameRunLevel.InRound),
+                "an ended rule's extension never fires");
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    ///     Outside a live round (post-round, or the restart flush) deaths must not score and losing
+    ///     the flagship must not record a defeat or announce one.
+    /// </summary>
+    [Test]
+    public async Task DeathsOutsideLiveRoundDoNothing()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var campaign = entityManager.System<NsvCampaignRuleSystem>();
+        var testMap = await pair.CreateTestMap();
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(gameTicker.StartGameRule("NsvCampaign"), Is.True);
+            var flagship = entityManager.SpawnEntity(null, testMap.MapCoords);
+            campaign.SetFlagship(flagship);
+            var kill = entityManager.SpawnEntity(null, testMap.MapCoords);
+            entityManager.AddComponent<NsvCampaignKillRewardComponent>(kill);
+
+            gameTicker.EndRound();
+            Assert.That(gameTicker.RunLevel, Is.Not.EqualTo(GameRunLevel.InRound));
+
+            entityManager.DeleteEntity(kill);
+            entityManager.DeleteEntity(flagship);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(campaign.GetOutcome(), Is.EqualTo(NsvCampaignOutcome.None),
+                    "losing the flagship after the round ended is not a defeat");
+                Assert.That(campaign.TryBuildSummary()!.Score, Is.EqualTo(0),
+                    "a kill after the round ended does not score");
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
 }
