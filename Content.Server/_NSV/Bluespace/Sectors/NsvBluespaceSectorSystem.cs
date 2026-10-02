@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Numerics;
 using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server._NSV.Bluespace.Sectors.Generators;
 using Content.Server._NSV.Bluespace.Strategy;
@@ -232,6 +233,17 @@ public sealed partial class NsvBluespaceSectorSystem : EntitySystem
             }
 
             _mapManager.DoMapInitialize(mapId);
+
+            // First materialization also pulls in the background fleet the strategy layer
+            // accumulated at this node while it was unvisited data. Mirrors the wake path
+            // (instantiate while still paused, before unpause); ships fan out around the
+            // anchor via FindFreeSpot so they don't stack on generated content. Resident
+            // ships are additive to the encounter's own generated ships.
+            _fleets.InstantiateNodeFleets(
+                new Strategy.NsvFleetNodeKey(starmapId, nodeId),
+                new EntityCoordinates(mapUid, Vector2.Zero),
+                out _);
+
             _map.SetPaused(mapId, false);
             instance.State = NsvBluespaceSectorState.Ready;
             return true;

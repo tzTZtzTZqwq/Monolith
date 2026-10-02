@@ -5,6 +5,7 @@ using Content.Server._Mono.FireControl;
 using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server._NSV.Bluespace.Sectors;
 using Content.Server._NSV.Bluespace.Sectors.Generators;
+using Content.Server._NSV.Bluespace.Strategy;
 using Content.Server._NSV.NPC;
 using Content.Server._NSV.NPC.HTN;
 using Content.Server.NPC.HTN;
@@ -24,6 +25,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Prototypes;
+using Robust.Shared.Utility;
 
 namespace Content.IntegrationTests.Tests._NSV.Bluespace.Sectors;
 
@@ -79,6 +81,47 @@ public sealed class NsvBluespaceSectorSystemTest
                 Assert.That(factions.IsHostile(federalGrid, hostileGrid), Is.True);
                 Assert.That(factions.IsHostile(hostileGrid, federalGrid), Is.True);
                 Assert.That(factions.IsHostile(playerGrid, federalGrid), Is.False);
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    [Test]
+    public async Task FirstMaterializationInstantiatesResidentDataFleet()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var scratchMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var sectors = entityManager.System<NsvBluespaceSectorSystem>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            // Pre-seed a data-state ship resident at a not-yet-materialized node, exactly as the
+            // strategy spawner would: register a grid against the node key, then park it on the
+            // holding map so its record goes Available.
+            var node = new NsvFleetNodeKey("NSVBluespaceTestStarmap", "SharedAlpha");
+            var grid = mapManager.CreateGridEntity(scratchMap.MapId).Owner;
+            var ship = fleets.RegisterShip(grid, new ResPath("/Maps/_NSV/test.yml"), node);
+            Assert.That(fleets.TrySerializeShip(ship.Id, out var serializeFailure), Is.True, serializeFailure);
+            Assert.That(ship.State, Is.EqualTo(NsvFleetShipState.Available), "parked as data before first visit");
+
+            // First materialization of that node (it has never slept, so this is the create path,
+            // not a wake).
+            Assert.That(
+                sectors.TryGetOrCreateNode("NSVBluespaceTestStarmap", "SharedAlpha", out var mapUid, out var failure),
+                Is.True,
+                failure);
+
+            // The accumulated background fleet is pulled into the world on first arrival, not left
+            // parked until a later wake.
+            Assert.Multiple(() =>
+            {
+                Assert.That(ship.State, Is.EqualTo(NsvFleetShipState.Live), "resident data fleet instantiated on first materialization");
+                Assert.That(entityManager.GetComponent<TransformComponent>(grid).MapUid, Is.EqualTo(mapUid));
             });
         });
 

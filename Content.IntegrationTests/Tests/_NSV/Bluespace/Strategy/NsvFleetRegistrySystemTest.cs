@@ -4,6 +4,8 @@ using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server._NSV.Bluespace.Strategy;
 using Content.Server.Shuttles.Components;
 using Content.Server.Shuttles.Systems;
+using Content.Shared.Mind;
+using Content.Shared.Mind.Components;
 using Robust.Server.GameObjects;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
@@ -621,6 +623,128 @@ public sealed class NsvFleetRegistrySystemTest
             var firstBox = firstEnt.Comp.LocalAABB.Translated(transform.GetWorldPosition(firstEnt.Owner));
             var secondBox = secondEnt.Comp.LocalAABB.Translated(transform.GetWorldPosition(secondEnt.Owner));
             Assert.That(firstBox.Intersects(secondBox), Is.False, "instantiated ships must not overlap");
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    /// The exit gate refuses to park a grid that carries a player-bound occupant: serializing it
+    /// would strand the body on the paused, non-wakeable holding map. The ship stays Live; once the
+    /// mind leaves, the gate opens.
+    /// </summary>
+    [Test]
+    public async Task SerializeBlockedByPlayerAboard()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var mapSystem = entityManager.System<SharedMapSystem>();
+        var transform = entityManager.System<SharedTransformSystem>();
+        var mindSystem = entityManager.System<SharedMindSystem>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            var gridEnt = mapManager.CreateGridEntity(testMap.MapId);
+            mapSystem.SetTile(gridEnt, new Vector2i(0, 0), new Tile(1));
+            var grid = gridEnt.Owner;
+            var ship = fleets.RegisterShip(grid, new ResPath("/Maps/_NSV/test.yml"));
+            var originMap = entityManager.GetComponent<TransformComponent>(grid).MapUid;
+
+            // A player-bound body aboard the ship. Anchor it to a tile so its GridUid pins to this
+            // grid (the harness runs no ticks, so grid traversal won't set it otherwise), matching a
+            // real occupant standing on the ship's floor.
+            var occupant = entityManager.SpawnEntity(null, new EntityCoordinates(grid, new Vector2(0.5f, 0.5f)));
+            transform.AnchorEntity(
+                (occupant, entityManager.GetComponent<TransformComponent>(occupant)),
+                (grid, gridEnt.Comp),
+                new Vector2i(0, 0));
+            Assert.That(entityManager.GetComponent<TransformComponent>(occupant).GridUid, Is.EqualTo(grid));
+
+            var mind = mindSystem.CreateMind(null);
+            mindSystem.TransferTo(mind, occupant, mind: mind);
+
+            Assert.That(fleets.TrySerializeShip(ship.Id, out var failure), Is.False);
+            Assert.Multiple(() =>
+            {
+                Assert.That(failure, Is.Not.Null);
+                Assert.That(ship.State, Is.EqualTo(NsvFleetShipState.Live), "boarded ship must stay Live");
+                Assert.That(entityManager.GetComponent<TransformComponent>(grid).MapUid, Is.EqualTo(originMap),
+                    "the body must not be parked on the holding map");
+            });
+
+            // The mind leaves (no ghost spawned) so the body is no longer player-bound: gate opens.
+            mindSystem.TransferTo(mind, null, createGhost: false, mind: mind);
+            Assert.That(fleets.TrySerializeShip(ship.Id, out _), Is.True);
+            Assert.That(ship.State, Is.EqualTo(NsvFleetShipState.Available));
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    /// Strategic FTL relocates a ship regardless of state: a data-state ship just re-points its
+    /// residency, a Live ship de-materializes first then re-points, and a boarded Live ship is
+    /// refused at the de-materialization gate and stays put.
+    /// </summary>
+    [Test]
+    public async Task FtlRelocatesDataAndLiveShipButRefusesBoarded()
+    {
+        await using var pair = await PoolManager.GetServerClient();
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var mapSystem = entityManager.System<SharedMapSystem>();
+        var transform = entityManager.System<SharedTransformSystem>();
+        var mindSystem = entityManager.System<SharedMindSystem>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            var origin = new NsvFleetNodeKey("test-starmap", "origin");
+            var destination = new NsvFleetNodeKey("test-starmap", "destination");
+
+            // A Live ship with nobody aboard: FTL serializes it, then re-points residency.
+            var grid = mapManager.CreateGridEntity(testMap.MapId).Owner;
+            var ship = fleets.RegisterShip(grid, new ResPath("/Maps/_NSV/test.yml"), origin);
+
+            Assert.That(fleets.TryFtlShip(ship.Id, destination, out var liveFailure), Is.True, liveFailure);
+            Assert.Multiple(() =>
+            {
+                Assert.That(ship.State, Is.EqualTo(NsvFleetShipState.Available), "Live FTL de-materializes first");
+                Assert.That(ship.DataNode, Is.EqualTo(destination));
+                Assert.That(fleets.GetResidentShips(origin), Does.Not.Contain(ship.Id));
+                Assert.That(fleets.GetResidentShips(destination), Does.Contain(ship.Id));
+            });
+
+            // Now a data-state ship: FTL is a pure residency move back to origin.
+            Assert.That(fleets.TryFtlShip(ship.Id, origin, out var dataFailure), Is.True, dataFailure);
+            Assert.That(ship.DataNode, Is.EqualTo(origin));
+
+            // A boarded Live ship cannot FTL: the gate refuses, so it stays Live and does not move.
+            var boardedEnt = mapManager.CreateGridEntity(testMap.MapId);
+            mapSystem.SetTile(boardedEnt, new Vector2i(0, 0), new Tile(1));
+            var boardedGrid = boardedEnt.Owner;
+            var boarded = fleets.RegisterShip(boardedGrid, new ResPath("/Maps/_NSV/boarded.yml"), origin);
+            var occupant = entityManager.SpawnEntity(null, new EntityCoordinates(boardedGrid, new Vector2(0.5f, 0.5f)));
+            transform.AnchorEntity(
+                (occupant, entityManager.GetComponent<TransformComponent>(occupant)),
+                (boardedGrid, boardedEnt.Comp),
+                new Vector2i(0, 0));
+            var mind = mindSystem.CreateMind(null);
+            mindSystem.TransferTo(mind, occupant, mind: mind);
+
+            Assert.That(fleets.TryFtlShip(boarded.Id, destination, out var boardedFailure), Is.False);
+            Assert.Multiple(() =>
+            {
+                Assert.That(boardedFailure, Is.Not.Null);
+                Assert.That(boarded.State, Is.EqualTo(NsvFleetShipState.Live), "boarded ship stays Live");
+                Assert.That(boarded.DataNode, Is.EqualTo(origin), "residency unchanged when the jump is refused");
+            });
         });
 
         await pair.CleanReturnAsync();

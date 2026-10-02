@@ -59,4 +59,36 @@ public sealed class NsvFleetShip
     /// full-complement floor count (= <see cref="NsvSerializableComponent.TargetFloorCount"/>).
     /// </summary>
     public IReadOnlyDictionary<Vector2i, Tile> FullComplementFloors = new Dictionary<Vector2i, Tile>();
+
+    /// <summary>
+    /// Turret count photographed at spawn, while the grid is Live and its guns are anchored.
+    /// Abstract combat power reads this scaled by completeness, because a grid parked on the
+    /// holding map loses its live turret associations (anchored guns detach across the map move),
+    /// so counting turrets on the frozen grid would always read zero. The live-grid
+    /// <see cref="NsvFleetRegistrySystem.GetCombatPower"/> still counts turrets directly.
+    /// </summary>
+    public int FullComplementTurretCount;
+
+    /// <summary>
+    /// Opaque faction id the strategy layer wants stamped onto this ship's grid each time it
+    /// materializes. The registry never interprets it — it only carries the tag and echoes it on
+    /// <see cref="NsvFleetShipInstantiatedEvent"/>. Null means "leave the grid's faction
+    /// untouched" and is the default, so sector-parked player and encounter grids (which
+    /// <see cref="NsvFleetRegistrySystem.SerializeSectorFleets"/> registers with no faction
+    /// intent) are never re-factioned on wake. Only the background spawner and admin sector-monitor
+    /// set it (to NSVHostile or NSVFederal), so only their ships pick up a faction when they wake
+    /// onto a live sector map.
+    /// </summary>
+    public string? Faction;
 }
+
+/// <summary>
+/// Raised by the registry immediately after a ship's grid goes Live on a sector map (via
+/// <see cref="NsvFleetRegistrySystem.TryInstantiateShip"/>). Lets the strategy layer apply
+/// materialization policy the faction-agnostic registry must not own — chiefly stamping the
+/// ship's <see cref="NsvFleetShip.Faction"/> onto the freshly materialized grid, which is only
+/// possible once the grid sits on a faction-enabled sector map. Carries the ship id and its
+/// now-live root grid.
+/// </summary>
+[ByRefEvent]
+public readonly record struct NsvFleetShipInstantiatedEvent(string ShipId, EntityUid RootGrid);

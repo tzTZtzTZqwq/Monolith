@@ -99,6 +99,52 @@
                                     </BoxContainer>
                                 </PanelContainer>
                             </PanelContainer>
+                            <!-- Campaign summary -->
+                            <BoxContainer Name="CampaignSection" Orientation="Vertical" Visible="False">
+                                <controls:StripeBack MinSize="48 48">
+                                    <Label Text="{Loc 'nsv-campaign-header'}"
+                                           VerticalExpand="True"
+                                           HorizontalAlignment="Center"/>
+                                </controls:StripeBack>
+                                <PanelContainer VerticalExpand="True" HorizontalExpand="True" Margin="4 4 4 4">
+                                    <PanelContainer.PanelOverride>
+                                        <graphics:StyleBoxFlat BorderThickness="4" BorderColor="#333333" BackgroundColor="#141414"/>
+                                    </PanelContainer.PanelOverride>
+                                    <PanelContainer VerticalExpand="True" HorizontalExpand="True" Margin="8 8 8 8">
+                                        <PanelContainer.PanelOverride>
+                                            <graphics:StyleBoxFlat BorderThickness="2" BorderColor="#151515" BackgroundColor="#050505"/>
+                                        </PanelContainer.PanelOverride>
+                                        <BoxContainer Orientation="Vertical" Margin="6 6 6 6">
+                                            <GridContainer Columns="2" HorizontalExpand="True">
+                                                <Label Text="{Loc 'nsv-campaign-caption-phase'}" FontColorOverride="#00ff2a"/>
+                                                <Label Name="CampaignPhaseValue"
+                                                       Text="—"
+                                                       HorizontalExpand="True"
+                                                       Align="Right"
+                                                       FontColorOverride="#00ff2a"/>
+                                                <Label Text="{Loc 'nsv-campaign-caption-score'}" FontColorOverride="#00ff2a"/>
+                                                <Label Name="CampaignScoreValue"
+                                                       Text="—"
+                                                       HorizontalExpand="True"
+                                                       Align="Right"
+                                                       FontColorOverride="#00ff2a"/>
+                                                <Label Text="{Loc 'nsv-campaign-caption-threat'}" FontColorOverride="#00ff2a"/>
+                                                <Label Name="CampaignThreatValue"
+                                                       Text="—"
+                                                       HorizontalExpand="True"
+                                                       Align="Right"
+                                                       FontColorOverride="#00ff2a"/>
+                                            </GridContainer>
+                                            <Label Text="{Loc 'nsv-campaign-objectives-header'}"
+                                                   FontColorOverride="#00ff2a"
+                                                   Margin="0 8 0 4"/>
+                                            <BoxContainer Name="CampaignObjectivesContainer"
+                                                          Orientation="Vertical"
+                                                          HorizontalExpand="True"/>
+                                        </BoxContainer>
+                                    </PanelContainer>
+                                </PanelContainer>
+                            </BoxContainer>
                         </BoxContainer>
                         <!-- ENCOUNTER screen -->
                         <BoxContainer Name="EncounterScreen"

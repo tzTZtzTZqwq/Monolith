@@ -3,3 +3,17 @@
   name: nsv-bluespace-encounter-patrol-name
   objective: nsv-bluespace-encounter-patrol-objective
   targetFaction: NSVHostile
+
+- type: nsvBluespaceEncounter
+  id: NSVClearSystemContract
+  name: nsv-bluespace-encounter-clearsystem-name
+  objective: nsv-bluespace-encounter-clearsystem-objective
+  targetFaction: NSVHostile
+  kind: ClearSystem
+
+- type: nsvBluespaceEncounter
+  id: NSVHoldContract
+  name: nsv-bluespace-encounter-hold-name
+  objective: nsv-bluespace-encounter-hold-objective
+  targetFaction: NSVHostile
+  kind: Hold

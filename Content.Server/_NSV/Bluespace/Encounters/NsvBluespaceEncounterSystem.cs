@@ -1,6 +1,9 @@
 using Content.Server._NSV.Bluespace.Sectors;
+using Content.Server._NSV.GameRule;
+using Content.Server.CartridgeLoader;
 using Content.Shared._NSV.Bluespace.Encounters;
 using Content.Shared._NSV.Bluespace.Sectors;
+using Content.Shared.CartridgeLoader;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
@@ -9,10 +12,44 @@ namespace Content.Server._NSV.Bluespace.Encounters;
 
 public sealed class NsvBluespaceEncounterSystem : EntitySystem
 {
+    // Legacy fallback for node-less template sectors (no StarmapId): the baseline Patrol Contract.
+    private static readonly ProtoId<NsvBluespaceEncounterPrototype> LegacyTemplateEncounter = "NSVPatrolContract";
+
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
+    [Dependency] private NsvCampaignRuleSystem _campaign = default!;
+    [Dependency] private CartridgeLoaderSystem _cartridgeLoader = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
 
     public event Action<EntityUid>? SectorDisplayChanged;
+
+    /// <summary>
+    /// Resolves the arriving shuttle's sector to an encounter definition and broadcasts
+    /// <see cref="NsvBluespaceEncounterArrivalEvent"/> so the matching per-kind system can activate.
+    /// This is the single place the definition id is resolved (node encounter id, with the legacy
+    /// template fallback for node-less sectors); the travel layer calls it kind-agnostically and never
+    /// knows which kind runs.
+    /// </summary>
+    public void DispatchArrival(EntityUid sectorMap, EntityUid shuttleUid)
+    {
+        if (!TryComp<NsvBluespaceSectorInstanceComponent>(sectorMap, out var sector))
+            return;
+
+        ProtoId<NsvBluespaceEncounterPrototype> definitionId = sector.EncounterDefinitionId;
+        if (string.IsNullOrEmpty(definitionId))
+        {
+            // A starmap node with an empty pool simply has no encounter; only node-less template
+            // sectors fall back to the baseline Patrol Contract.
+            if (!string.IsNullOrEmpty(sector.StarmapId))
+                return;
+
+            definitionId = LegacyTemplateEncounter;
+        }
+
+        if (!_prototypes.TryIndex(definitionId, out var definition))
+            return;
+
+        RaiseLocalEvent(new NsvBluespaceEncounterArrivalEvent(sectorMap, shuttleUid, definitionId, definition.Kind));
+    }
 
     public bool TryGetOrCreate(
         EntityUid sectorMap,
@@ -125,6 +162,10 @@ public sealed class NsvBluespaceEncounterSystem : EntitySystem
         NotifySectorChanged(encounter.SectorMap);
     }
 
+    /// <summary>
+    /// Completes a single-target encounter (e.g. Destroy): requires the controller's recorded
+    /// <see cref="NsvBluespaceEncounterComponent.ObjectiveTarget"/> to equal <paramref name="targetUid"/>.
+    /// </summary>
     public bool TryCompleteObjective(EntityUid controllerUid, EntityUid targetUid)
     {
         if (!TryComp<NsvBluespaceEncounterComponent>(controllerUid, out var encounter) ||
@@ -134,10 +175,61 @@ public sealed class NsvBluespaceEncounterSystem : EntitySystem
             return false;
         }
 
+        OpenExtraction(encounter);
+        return true;
+    }
+
+    /// <summary>
+    /// Completes an objectiveless encounter (e.g. ClearSystem, Hold): the only gate is that the
+    /// encounter is still Active. The owning kind system decides when its win condition is met.
+    /// </summary>
+    public bool TryComplete(EntityUid controllerUid)
+    {
+        if (!TryComp<NsvBluespaceEncounterComponent>(controllerUid, out var encounter) ||
+            encounter.State != NsvBluespaceEncounterState.Active)
+        {
+            return false;
+        }
+
+        OpenExtraction(encounter);
+        return true;
+    }
+
+    /// <summary>
+    /// Shared completion transition: flip the encounter open for extraction, settle the kind-agnostic
+    /// completion side effects (campaign reward + participant notification), and refresh displays.
+    /// </summary>
+    private void OpenExtraction(NsvBluespaceEncounterComponent encounter)
+    {
         encounter.State = NsvBluespaceEncounterState.ObjectiveComplete;
         encounter.State = NsvBluespaceEncounterState.ExtractionOpen;
+        Complete(encounter);
         NotifySectorChanged(encounter.SectorMap);
-        return true;
+    }
+
+    /// <summary>
+    /// Completion side effects shared by every encounter kind: award the sector node's campaign reward
+    /// (the only payout seam — never direct credits) and push the completion notification to every
+    /// participant's navigation cartridge.
+    /// </summary>
+    private void Complete(NsvBluespaceEncounterComponent encounter)
+    {
+        if (TryComp<NsvBluespaceSectorInstanceComponent>(encounter.SectorMap, out var sector))
+            _campaign.NotifyEncounterComplete(sector.StarmapId, sector.NodeId);
+
+        var header = Loc.GetString("nsv-bluespace-encounter-complete-header");
+        var message = Loc.GetString("nsv-bluespace-encounter-complete-text");
+        var query = EntityQueryEnumerator<NsvBluespaceNavigationCartridgeComponent, CartridgeComponent, TransformComponent>();
+        while (query.MoveNext(out _, out _, out var cartridge, out var transform))
+        {
+            if (cartridge.LoaderUid is not { } loaderUid || transform.GridUid is not { } gridUid)
+                continue;
+
+            if (!encounter.Participants.Contains(gridUid))
+                continue;
+
+            _cartridgeLoader.SendNotification(loaderUid, header, message);
+        }
     }
 
     public void Fail(EntityUid controllerUid)

@@ -73,3 +73,42 @@ public sealed partial class NsvEncounterPatrolCoreObjectiveComponent : Component
     [ViewVariables]
     public EntityUid BlipGrid = EntityUid.Invalid;
 }
+
+/// <summary>
+/// Marks one hostile AI core as a ClearSystem target. Terminating it removes it from the controller's
+/// <see cref="NsvEncounterClearObjectiveComponent.RemainingTargets"/>; clearing the set completes.
+/// </summary>
+[RegisterComponent]
+public sealed partial class NsvEncounterClearTargetComponent : Component
+{
+    [ViewVariables]
+    public EntityUid Controller;
+
+    [ViewVariables]
+    public EntityUid BlipGrid = EntityUid.Invalid;
+}
+
+/// <summary>
+/// Controller-side state for a ClearSystem encounter: the set of hostile cores still alive. The set is
+/// a snapshot taken at activation — ships that spawn into the node afterwards are not added (v1).
+/// </summary>
+[RegisterComponent]
+public sealed partial class NsvEncounterClearObjectiveComponent : Component
+{
+    [ViewVariables]
+    public readonly HashSet<EntityUid> RemainingTargets = new();
+}
+
+/// <summary>
+/// Controller-side state for a Hold encounter: the moment the hold is satisfied. Extraction stays
+/// gated (<c>CanReturn</c> false) until the kind system completes the encounter at this time.
+/// </summary>
+[RegisterComponent]
+public sealed partial class NsvEncounterHoldObjectiveComponent : Component
+{
+    [ViewVariables]
+    public EntityUid Controller;
+
+    [ViewVariables]
+    public TimeSpan EndTime;
+}

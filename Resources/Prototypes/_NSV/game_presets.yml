@@ -1,0 +1,21 @@
+# NSV campaign mode (feature branch). Mirrors MonoStandard's baseline round setup and adds the
+# NsvCampaign round-loop rule on top. Admin-selectable only (showInVote: false) while WIP.
+- type: gamePreset
+  id: MonoNsvCampaign
+  alias:
+    - nsvcampaign
+  name: mono-nsv-campaign-title
+  description: mono-nsv-campaign-description
+  showInVote: false
+  rules:
+  - NFAdventure
+  - BasicStationEventScheduler
+  - BluespaceEventScheduler
+  - BluespaceDungeonEventScheduler
+  - BluespaceSalvageEventScheduler
+  - SmugglingEventScheduler
+  - FrontierRoundstartVariation
+  - MonoMonolithicEventsScheduler
+  - ManualPortstrikeTsfPdv
+  - StarSystemKyphrus
+  - NsvCampaign

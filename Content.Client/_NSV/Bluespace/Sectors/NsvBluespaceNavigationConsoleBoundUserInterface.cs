@@ -95,6 +95,8 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
             : "—";
         SectorDescriptionValue.Text = Loc.GetString(state.SectorDescription);
 
+        UpdateCampaign(state.Campaign);
+
         if (!state.HasEncounter)
         {
             EncounterNameValue.Text = Loc.GetString("nsv-bluespace-console-encounter-none");
@@ -124,6 +126,43 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
 
         UpdateSelectedNode();
         ReturnButton.Disabled = !state.CanReturnToDeparture;
+    }
+
+    private void UpdateCampaign(NsvCampaignSummaryState? campaign)
+    {
+        if (campaign == null)
+        {
+            CampaignSection.Visible = false;
+            CampaignObjectivesContainer.RemoveAllChildren();
+            return;
+        }
+
+        CampaignSection.Visible = true;
+        CampaignPhaseValue.Text = Loc.GetString(campaign.PhaseLoc);
+        CampaignScoreValue.Text = campaign.Score.ToString();
+        CampaignThreatValue.Text = campaign.ThreatElevation.ToString();
+
+        CampaignObjectivesContainer.RemoveAllChildren();
+        foreach (var objective in campaign.Objectives)
+        {
+            var row = new BoxContainer { Orientation = BoxContainer.LayoutOrientation.Horizontal, HorizontalExpand = true };
+            row.AddChild(new Label
+            {
+                Text = Loc.GetString(objective.LabelLoc),
+                FontColorOverride = Color.FromHex("#00ff2a"),
+            });
+            row.AddChild(new Label
+            {
+                Text = Loc.GetString("nsv-campaign-objective-progress",
+                    ("status", Loc.GetString(objective.StatusLoc)),
+                    ("tally", objective.Tally),
+                    ("target", objective.Target)),
+                HorizontalExpand = true,
+                Align = Label.AlignMode.Right,
+                FontColorOverride = Color.FromHex("#00ff2a"),
+            });
+            CampaignObjectivesContainer.AddChild(row);
+        }
     }
 
     private void SelectNode(string nodeId)

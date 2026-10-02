@@ -1,5 +1,6 @@
 using System.Linq;
 using Content.Server._NSV.Bluespace.Encounters;
+using Content.Server._NSV.GameRule;
 using Content.Shared._NSV.Bluespace.Encounters;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared._NSV.Bluespace.Starmap;
@@ -16,6 +17,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceSectorLifecycleSystem _lifecycle = default!;
     [Dependency] private NsvBluespaceSectorTravelSystem _travel = default!;
+    [Dependency] private NsvCampaignRuleSystem _campaign = default!;
     [Dependency] private SharedPopupSystem _popup = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
     [Dependency] private IRobustRandom _random = default!;
@@ -32,6 +34,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _travel.ShuttleDisplayChanged += RefreshShuttle;
         _encounters.SectorDisplayChanged += RefreshSector;
         _lifecycle.SectorDisplayChanged += RefreshSector;
+        _campaign.CampaignDisplayChanged += RefreshAllConsoles;
     }
 
     public override void Shutdown()
@@ -40,6 +43,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _travel.ShuttleDisplayChanged -= RefreshShuttle;
         _encounters.SectorDisplayChanged -= RefreshSector;
         _lifecycle.SectorDisplayChanged -= RefreshSector;
+        _campaign.CampaignDisplayChanged -= RefreshAllConsoles;
         base.Shutdown();
     }
 
@@ -99,6 +103,15 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             if (transform.GridUid == shuttleUid)
                 UpdateState(uid, jumpPoint);
         }
+    }
+
+    // The campaign readout (score / threat) is global, not tied to a sector, so refresh every open
+    // console when it changes.
+    private void RefreshAllConsoles()
+    {
+        var query = EntityManager.AllEntityQueryEnumerator<NsvBluespaceJumpPointComponent>();
+        while (query.MoveNext(out var uid, out var jumpPoint))
+            UpdateState(uid, jumpPoint);
     }
 
     private void UpdateState(EntityUid uid, NsvBluespaceJumpPointComponent jumpPoint)
@@ -202,7 +215,8 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             canExtract,
             starmapNodes,
             currentNodeId,
-            canReturnToDeparture);
+            canReturnToDeparture,
+            _campaign.TryBuildSummary());
     }
 
     private List<NsvBluespaceStarmapNodeState> BuildStarmapNodes(

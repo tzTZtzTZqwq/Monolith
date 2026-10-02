@@ -1,0 +1,1 @@
+此文件夹NSV_prototype_ref为这个另一个开源游戏的玩法参考，架构与monolith/NSV14不同，仅作玩法参照

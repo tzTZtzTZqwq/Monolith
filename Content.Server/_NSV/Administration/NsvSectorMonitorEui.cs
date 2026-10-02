@@ -43,7 +43,7 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
     }
 
     private const string StarmapId = "NSVBluespaceStrategicMap";
-    private static readonly ResPath KestrelGridPath = new("/SharedMaps/_Mono/Shuttles/kestrel.yml");
+    private static readonly ResPath DataShipGridPath = new("/SharedMaps/_NSV/Bluespace/gust_2.yml");
 
     public override EuiStateBase GetNewState()
     {
@@ -119,6 +119,7 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
                 ship.GridPath.ToString(),
                 ship.State.ToString(),
                 ship.DataNode?.NodeId,
+                ship.Faction,
                 fleets.GetCompleteness(ship.Id)))
             .OrderBy(fleet => fleet.ShipId)
             .ToArray();
@@ -160,8 +161,12 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
             case RefreshRequest:
                 StateDirty();
                 break;
+            case StartOutcomeVoteRequest:
+                _entityManager.System<GameRule.NsvCampaignRuleSystem>().ForceOutcomeVote();
+                StateDirty();
+                break;
             case SpawnDataFleetRequest spawn:
-                SpawnDataFleet(spawn.StarmapId, spawn.NodeId);
+                SpawnDataFleet(spawn.StarmapId, spawn.NodeId, spawn.Faction);
                 StateDirty();
                 break;
             case MoveFleetRequest move:
@@ -172,7 +177,7 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
         }
     }
 
-    private void SpawnDataFleet(string starmapId, string nodeId)
+    private void SpawnDataFleet(string starmapId, string nodeId, string faction)
     {
         var fleets = _entityManager.System<NsvFleetRegistrySystem>();
         var map = _entityManager.System<MapSystem>();
@@ -182,10 +187,13 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
         map.SetPaused(scratchMap, true);
         try
         {
-            if (!mapLoader.TryLoadGrid(scratchMap, KestrelGridPath, out var grid))
+            if (!mapLoader.TryLoadGrid(scratchMap, DataShipGridPath, out var grid))
                 return;
 
-            var ship = fleets.RegisterShip(grid.Value.Owner, KestrelGridPath, new NsvFleetNodeKey(starmapId, nodeId));
+            var ship = fleets.RegisterShip(grid.Value.Owner, DataShipGridPath, new NsvFleetNodeKey(starmapId, nodeId));
+            // Empty means "no faction" — leave the grid's faction untouched on wake, as the
+            // registry does for sector-parked player/encounter grids.
+            ship.Faction = string.IsNullOrEmpty(faction) ? null : faction;
             fleets.TrySerializeShip(ship.Id, out _);
         }
         finally

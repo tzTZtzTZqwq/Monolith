@@ -3,6 +3,9 @@ using System.Numerics;
 using Content.Server._Mono.FireControl;
 using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server.Shuttles.Systems;
+using Content.Shared.GameTicking;
+using Content.Shared.Ghost;
+using Content.Shared.Mind.Components;
 using Robust.Server.GameObjects;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
@@ -43,9 +46,31 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
     private ulong _nextBindingGeneration = 1;
     private MapId _holdingMap = MapId.Nullspace;
 
+    public override void Initialize()
+    {
+        base.Initialize();
+        // Records are per-round: the holding map and every ship binding belong to the round that
+        // created them. Shutdown alone only fires at server stop, so without this the registry
+        // leaks stale ships/residency across rounds once a background spawner keeps making them.
+        SubscribeLocalEvent<RoundRestartCleanupEvent>(OnRoundRestart);
+    }
+
     public override void Shutdown()
     {
         base.Shutdown();
+        ResetState();
+    }
+
+    private void OnRoundRestart(RoundRestartCleanupEvent args)
+    {
+        ResetState();
+    }
+
+    private void ResetState()
+    {
+        if (_holdingMap != MapId.Nullspace && _map.MapExists(_holdingMap))
+            _map.DeleteMap(_holdingMap);
+
         _ships.Clear();
         _residency.Clear();
         _holdingMap = MapId.Nullspace;
@@ -71,6 +96,7 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
             State = NsvFleetShipState.Live,
             BindingGeneration = generation,
             FullComplementFloors = fullComplement,
+            FullComplementTurretCount = CountTurrets(gridUid),
         };
         _ships.Add(shipId, ship);
         SetResidency(ship, node);
@@ -111,14 +137,40 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
             return false;
         }
 
-        if (ship.State == NsvFleetShipState.Live)
+        if (ship.State != NsvFleetShipState.Available)
         {
-            failure = $"Ship '{shipId}' is Live; move its grid via serialize/instantiate, not the strategic map.";
+            failure = $"Ship '{shipId}' is {ship.State}, not Available; only data-state ships move on the strategic map.";
             return false;
         }
 
         SetResidency(ship, destination);
         return true;
+    }
+
+    /// <summary>
+    /// Strategic FTL entry point for AI fleets: relocates a ship to <paramref name="destination"/>
+    /// regardless of its current state, the single call a strategy/AI driver uses to order a jump.
+    /// A data-state (Available) ship just re-points its residency. A Live ship first de-materializes
+    /// through the exit-reference gate (which refuses if a player is aboard, so a boarded ship stays
+    /// Live and does not relocate), then re-points residency; it re-materializes on its own when the
+    /// destination node next becomes an active sector via the normal wake/first-materialization path.
+    /// The registry stays starmap-agnostic: reachability/adjacency is the caller's concern.
+    /// </summary>
+    public bool TryFtlShip(string shipId, NsvFleetNodeKey destination, out string? failure)
+    {
+        failure = null;
+        if (!_ships.TryGetValue(shipId, out var ship))
+        {
+            failure = $"Ship '{shipId}' is unknown.";
+            return false;
+        }
+
+        // Live ships must return to the data state before moving; the gate inside protects a
+        // boarded ship from being parked, in which case the jump is refused and the ship stays Live.
+        if (ship.State == NsvFleetShipState.Live && !TrySerializeShip(shipId, out failure))
+            return false;
+
+        return TryMoveShipToNode(shipId, destination, out failure);
     }
 
     /// <summary>
@@ -260,17 +312,34 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
     }
 
     /// <summary>
-    /// The exit-reference gate: a ship may only leave once nothing outside itself holds a
-    /// live reference to it. Forces undocking (a repair, not a failure), then blocks if the
-    /// grid is an active encounter's participant or objective target. Encounter references
-    /// are always external — the encounter points at the ship — so they always block.
-    /// Unhandled references are recorded in <see cref="NsvFleetShip.RepresentationFailure"/>
-    /// and the ship stays put.
+    /// The exit-reference gate: a ship may only leave the live world once nothing outside itself
+    /// holds a live reference to it. Refuses any grid carrying a player-bound occupant (a mind
+    /// aboard) so serializing never strands a body on the holding map. Then forces undocking (a
+    /// repair, not a failure), and blocks if the grid is an active encounter's participant or
+    /// objective target. Encounter references are always external — the encounter points at the
+    /// ship — so they always block. Unhandled references are recorded in
+    /// <see cref="NsvFleetShip.RepresentationFailure"/> and the ship stays put.
     /// </summary>
     private bool TryClearReferences(NsvFleetShip ship, out string? failure)
     {
         failure = null;
         var gridUid = ship.RootGrid;
+
+        // A grid carrying a player-bound consciousness must never leave the live world: parking it
+        // on the paused, faction-less, non-wakeable holding map would strand the body off-map. Keep
+        // the ship Live instead — this is the shared guard for every de-materialization trigger
+        // (sector sleep, damaged retreat, strategic FTL). Ghosts are excluded (they carry a mind but
+        // no body to strand), matching the sleep blocker's IsActiveGameplayCharacter.
+        var occupants = EntityQueryEnumerator<MindContainerComponent, TransformComponent>();
+        while (occupants.MoveNext(out var occupant, out var mindContainer, out var xform))
+        {
+            if (xform.GridUid != gridUid || !mindContainer.HasMind || HasComp<GhostComponent>(occupant))
+                continue;
+
+            ship.RepresentationFailure = "carries a player-bound occupant";
+            failure = $"Ship '{ship.Id}' {ship.RepresentationFailure}.";
+            return false;
+        }
 
         // Undocking is a safe, executable fix; run it up front so a merely-docked ship departs.
         _docking.UndockDocks(gridUid);
@@ -337,6 +406,11 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
         // converges to the same grid rather than damaging further.
         if (ship.DataTargetFloorCount >= 0)
             TrySetFloorCount(shipId, ship.DataTargetFloorCount, out _);
+
+        // The grid is now Live on a (faction-enabled) sector map; let the strategy layer stamp
+        // faction or any other materialization policy the registry stays agnostic to.
+        var instantiated = new NsvFleetShipInstantiatedEvent(shipId, ship.RootGrid);
+        RaiseLocalEvent(ref instantiated);
 
         return true;
     }
@@ -430,6 +504,37 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
         return true;
     }
 
+    /// <summary>
+    /// Destroys a data-state ship after abstract combat wipes it out: clears its residency so it no
+    /// longer counts or fights, deletes its parked grid, and flips the record to a
+    /// <see cref="NsvFleetShipState.Destroyed"/> tombstone so its id is never reused and stale
+    /// references resolve. Requires the ship to be Available — a Live ship dies through its grid, not
+    /// here. The Queued grid deletion fires on the holding map, which kill-scoring ignores
+    /// (<see cref="HoldingMap"/>), so an abstract death never scores as a player kill.
+    /// </summary>
+    public bool TryDestroyDataShip(string shipId, out string? failure)
+    {
+        failure = null;
+        if (!_ships.TryGetValue(shipId, out var ship))
+        {
+            failure = $"Ship '{shipId}' is unknown.";
+            return false;
+        }
+
+        if (ship.State != NsvFleetShipState.Available)
+        {
+            failure = $"Ship '{shipId}' is {ship.State}, not in the data state.";
+            return false;
+        }
+
+        SetResidency(ship, null);
+        ship.State = NsvFleetShipState.Destroyed;
+        if (!TerminatingOrDeleted(ship.RootGrid))
+            QueueDel(ship.RootGrid);
+
+        return true;
+    }
+
     public bool TryGetShip(string shipId, out NsvFleetShip ship)
     {
         return _ships.TryGetValue(shipId, out ship!);
@@ -438,9 +543,11 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
     public IReadOnlyCollection<NsvFleetShip> Ships => _ships.Values;
 
     /// <summary>
-    /// Completeness = current floor count / full-complement count, in [0, 1]. Derived
-    /// straight from the grid, never stored; returns 0 if the grid is gone or had no
-    /// floors at spawn.
+    /// Completeness = current floor count / full-complement count, in [0, 1]. Returns 0 if the grid
+    /// is gone or had no floors at spawn. A parked (Available) ship reads its frozen
+    /// <see cref="NsvFleetShip.DataTargetFloorCount"/> instead of the live grid: abstract combat lowers
+    /// that number without touching the grid (floors are only cut when it materializes), so reading the
+    /// grid would show a full ship right up until it's destroyed. A Live ship reads its actual grid.
     /// </summary>
     public float GetCompleteness(string shipId)
     {
@@ -451,7 +558,11 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
             return 0f;
         }
 
-        return Math.Clamp((float) CountFloors(ship.RootGrid) / ship.FullComplementFloors.Count, 0f, 1f);
+        var floors = ship.State == NsvFleetShipState.Available && ship.DataTargetFloorCount >= 0
+            ? ship.DataTargetFloorCount
+            : CountFloors(ship.RootGrid);
+
+        return Math.Clamp((float) floors / ship.FullComplementFloors.Count, 0f, 1f);
     }
 
     /// <summary>
@@ -504,15 +615,45 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
         if (!_ships.TryGetValue(shipId, out var ship) || !GridIsBound(ship, out _))
             return 0f;
 
+        return CountTurrets(ship.RootGrid) * GetCompleteness(shipId);
+    }
+
+    /// <summary>
+    /// Abstract-combat power for a parked (Available) ship: its photographed full-complement turret
+    /// count (<see cref="NsvFleetShip.FullComplementTurretCount"/>, taken at spawn while the guns were
+    /// still anchored) scaled by its data-state completeness (<see cref="NsvFleetShip.DataTargetFloorCount"/>
+    /// over full complement). The frozen grid's live turrets can't be counted — anchored guns detach
+    /// across the holding-map move — so the photograph is the only turret authority here; abstract
+    /// damage lowers the data number, which is what makes a battered data ship fight weaker.
+    /// <see cref="GetCombatPower"/> counts a Live grid's turrets directly. Zero for non-Available or
+    /// unphotographed ships (a turretless ship reads zero and simply cannot attack).
+    /// </summary>
+    public float GetDataCombatPower(string shipId)
+    {
+        if (!_ships.TryGetValue(shipId, out var ship) ||
+            ship.State != NsvFleetShipState.Available ||
+            ship.DataTargetFloorCount < 0 ||
+            ship.FullComplementFloors.Count == 0 ||
+            !GridIsBound(ship, out _))
+        {
+            return 0f;
+        }
+
+        var completeness = Math.Clamp((float) ship.DataTargetFloorCount / ship.FullComplementFloors.Count, 0f, 1f);
+        return ship.FullComplementTurretCount * completeness;
+    }
+
+    private int CountTurrets(EntityUid gridUid)
+    {
         var turrets = 0;
         var query = EntityQueryEnumerator<FireControllableComponent, TransformComponent>();
         while (query.MoveNext(out _, out _, out var xform))
         {
-            if (xform.GridUid == ship.RootGrid)
+            if (xform.GridUid == gridUid)
                 turrets++;
         }
 
-        return turrets * GetCompleteness(shipId);
+        return turrets;
     }
 
     /// <summary>
@@ -545,6 +686,13 @@ public sealed class NsvFleetRegistrySystem : EntitySystem
 
         return true;
     }
+
+    /// <summary>
+    /// The holding map's id, or <see cref="MapId.Nullspace"/> before it is first created. Data-state
+    /// ships' grids are parked here; a grid sitting on this map is not a live-world entity, which lets
+    /// kill-scoring ignore abstract (AI-vs-AI) deaths that delete parked grids.
+    /// </summary>
+    public MapId HoldingMap => _holdingMap;
 
     /// <summary>
     /// The global holding map that parks serialized grids. Created once per server run

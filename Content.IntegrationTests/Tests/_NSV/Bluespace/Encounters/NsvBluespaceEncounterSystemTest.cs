@@ -172,7 +172,6 @@ public sealed class NsvBluespaceEncounterSystemTest
         var shuttle = await pair.CreateTestMap();
         var entityManager = server.ResolveDependency<IEntityManager>();
         var encounters = entityManager.System<NsvBluespaceEncounterSystem>();
-        var patrolContracts = entityManager.System<NsvBluespacePatrolContractSystem>();
         var sectors = entityManager.System<NsvBluespaceSectorSystem>();
         var sectorMap = EntityUid.Invalid;
         var controllerUid = EntityUid.Invalid;
@@ -185,7 +184,7 @@ public sealed class NsvBluespaceEncounterSystemTest
                 Is.True,
                 reason);
 
-            patrolContracts.OnSectorArrival(sectorMap, shuttle.Grid.Owner);
+            encounters.DispatchArrival(sectorMap, shuttle.Grid.Owner);
             var sector = entityManager.GetComponent<NsvBluespaceSectorInstanceComponent>(sectorMap);
             controllerUid = sector.EncounterController;
             var encounter = entityManager.GetComponent<NsvBluespaceEncounterComponent>(controllerUid);

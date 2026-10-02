@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Numerics;
 using Content.Server._NSV.Bluespace.Encounters;
+using Content.Server._NSV.GameRule;
 using Content.Server.Shuttles.Components;
 using Content.Server.Shuttles.Events;
 using Content.Server.Shuttles.Systems;
@@ -17,9 +18,9 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
 {
     private const string PlayerFaction = "NSVPlayer";
 
+    [Dependency] private NsvCampaignRuleSystem _campaign = default!;
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
-    [Dependency] private NsvBluespacePatrolContractSystem _patrolContracts = default!;
     [Dependency] private NsvBluespaceSectorSystem _sectors = default!;
     [Dependency] private ShuttleSystem _shuttle = default!;
 
@@ -343,9 +344,24 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         sector.ForeignGrids.Add(ev.Entity);
         CompleteArrival(ev.Entity, ev.MapUid);
         _factions.SetFaction(ev.Entity, PlayerFaction);
-        _patrolContracts.OnSectorArrival(ev.MapUid, ev.Entity);
+        _encounters.DispatchArrival(ev.MapUid, ev.Entity);
+        if (IsHomeNode(sector))
+            _campaign.NotifyHomeArrival();
+        else
+            _campaign.NotifyJumpArrived();
         NotifySectorChanged(ev.MapUid);
         NotifyShuttleChanged(ev.Entity);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="sector"/> is a Home node (the extraction point). Node-less template
+    /// sectors (empty StarmapId/NodeId) resolve to false.
+    /// </summary>
+    private bool IsHomeNode(NsvBluespaceSectorInstanceComponent sector)
+    {
+        return _sectors.TryGetStarmap(sector.StarmapId, out var starmap) &&
+               starmap.TryGetNode(sector.NodeId, out var node) &&
+               node.Type == NsvBluespaceStarmapNodeType.Home;
     }
 
     private void CancelArrival(EntityUid shuttleUid)

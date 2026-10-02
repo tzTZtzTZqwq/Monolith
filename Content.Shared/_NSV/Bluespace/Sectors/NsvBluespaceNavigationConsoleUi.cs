@@ -72,6 +72,40 @@ public sealed class NsvBluespaceStarmapNodeState
 }
 
 [Serializable, NetSerializable]
+public sealed class NsvCampaignObjectiveReadout
+{
+    public readonly string LabelLoc;
+    public readonly string StatusLoc;
+    public readonly int Tally;
+    public readonly int Target;
+
+    public NsvCampaignObjectiveReadout(string labelLoc, string statusLoc, int tally, int target)
+    {
+        LabelLoc = labelLoc;
+        StatusLoc = statusLoc;
+        Tally = tally;
+        Target = target;
+    }
+}
+
+[Serializable, NetSerializable]
+public sealed class NsvCampaignSummaryState
+{
+    public readonly string PhaseLoc;
+    public readonly int Score;
+    public readonly int ThreatElevation;
+    public readonly List<NsvCampaignObjectiveReadout> Objectives;
+
+    public NsvCampaignSummaryState(string phaseLoc, int score, int threatElevation, List<NsvCampaignObjectiveReadout> objectives)
+    {
+        PhaseLoc = phaseLoc;
+        Score = score;
+        ThreatElevation = threatElevation;
+        Objectives = objectives;
+    }
+}
+
+[Serializable, NetSerializable]
 public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
 {
     public readonly string SectorName;
@@ -89,6 +123,7 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
     public readonly List<NsvBluespaceStarmapNodeState> StarmapNodes;
     public readonly string? CurrentNodeId;
     public readonly bool CanReturnToDeparture;
+    public readonly NsvCampaignSummaryState? Campaign;
 
     public NsvBluespaceNavigationConsoleState(
         string sectorName,
@@ -105,7 +140,8 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         bool canExtract,
         List<NsvBluespaceStarmapNodeState>? starmapNodes = null,
         string? currentNodeId = null,
-        bool canReturnToDeparture = false)
+        bool canReturnToDeparture = false,
+        NsvCampaignSummaryState? campaign = null)
     {
         SectorName = sectorName;
         SectorDescription = sectorDescription;
@@ -122,5 +158,6 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         StarmapNodes = starmapNodes ?? new List<NsvBluespaceStarmapNodeState>();
         CurrentNodeId = currentNodeId;
         CanReturnToDeparture = canReturnToDeparture;
+        Campaign = campaign;
     }
 }

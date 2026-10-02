@@ -11,10 +11,13 @@ namespace Content.Client._NSV.Administration.UI;
 [GenerateTypedNameReferences]
 public sealed partial class NsvSectorMonitorWindow : DefaultWindow
 {
-    // nodeId
-    public event Action<string>? OnSpawnFleet;
+    // nodeId, faction
+    public event Action<string, string>? OnSpawnFleet;
     // shipId, nodeId
     public event Action<string, string>? OnMoveFleet;
+
+    // OptionButton item id -> faction id sent to the server.
+    private static readonly string[] SpawnFactions = { "NSVHostile", "NSVFederal" };
 
     private NsvSectorMonitorNode[] _nodes = Array.Empty<NsvSectorMonitorNode>();
     private string _starmapId = string.Empty;
@@ -26,13 +29,18 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
         RobustXamlLoader.Load(this);
         SetRows(Array.Empty<NsvSectorMonitorRow>());
 
+        FactionButton.AddItem(Loc.GetString("nsv-sector-monitor-spawn-faction-hostile"), 0);
+        FactionButton.AddItem(Loc.GetString("nsv-sector-monitor-spawn-faction-federal"), 1);
+        FactionButton.OnItemSelected += args => FactionButton.SelectId(args.Id);
+        FactionButton.SelectId(0);
+
         Starmap.OnNodeSelected += OnNodeSelected;
         FleetList.OnItemSelected += OnFleetSelected;
         FleetList.OnItemDeselected += _ => { _selectedShipId = null; UpdateMoveState(); };
         SpawnFleetButton.OnPressed += _ =>
         {
             if (_selectedNodeId != null)
-                OnSpawnFleet?.Invoke(_selectedNodeId);
+                OnSpawnFleet?.Invoke(_selectedNodeId, SpawnFactions[FactionButton.SelectedId]);
         };
         MoveFleetButton.OnPressed += _ =>
         {
@@ -75,6 +83,7 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
                 "nsv-sector-monitor-fleet-entry",
                 ("id", fleet.ShipId),
                 ("state", fleet.State),
+                ("faction", fleet.Faction ?? "-"),
                 ("node", node),
                 ("completeness", (int) MathF.Round(fleet.Completeness * 100)));
             var item = FleetList.AddItem(label);

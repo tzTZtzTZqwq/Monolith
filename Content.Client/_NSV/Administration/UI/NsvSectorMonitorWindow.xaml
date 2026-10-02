@@ -1,7 +1,7 @@
 <DefaultWindow xmlns="https://spacestation14.io"
                xmlns:ui="clr-namespace:Content.Client._NSV.Administration.UI"
                Title="{Loc nsv-sector-monitor-title}"
-               SetSize="1100 760">
+               SetSize="1740 760">
     <BoxContainer Orientation="Vertical" Margin="8">
         <BoxContainer Orientation="Horizontal" Margin="0 0 0 4">
             <Label Name="TotalSectorCapacity"
@@ -18,6 +18,11 @@
                 Text="{Loc nsv-sector-monitor-refresh}"
                 HorizontalAlignment="Right"
                 Margin="0 0 0 8" />
+        <Button Name="StartVoteButton"
+                Access="Public"
+                Text="{Loc nsv-sector-monitor-start-vote}"
+                HorizontalAlignment="Right"
+                Margin="0 0 0 8" />
         <ScrollContainer MinHeight="180" HorizontalExpand="True">
             <GridContainer Name="Rows"
                            Access="Public"
@@ -32,7 +37,7 @@
                 <ui:NsvStarmapControl Name="Starmap" Access="Public" />
             </PanelContainer>
             <BoxContainer Orientation="Vertical"
-                          MinWidth="320"
+                          MinWidth="960"
                           Margin="8 0 0 0">
                 <Label Name="SelectedNodeLabel"
                        Access="Public"
@@ -44,6 +49,9 @@
                           Access="Public"
                           MinHeight="90"
                           SelectMode="None" />
+                <OptionButton Name="FactionButton"
+                              Access="Public"
+                              Margin="0 4 0 0" />
                 <Button Name="SpawnFleetButton"
                         Access="Public"
                         Text="{Loc nsv-sector-monitor-spawn-fleet}"

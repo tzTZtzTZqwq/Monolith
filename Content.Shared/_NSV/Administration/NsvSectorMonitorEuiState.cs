@@ -77,12 +77,14 @@ public sealed class NsvSectorMonitorFleet
         string gridPath,
         string state,
         string? nodeId,
+        string? faction,
         float completeness)
     {
         ShipId = shipId;
         GridPath = gridPath;
         State = state;
         NodeId = nodeId;
+        Faction = faction;
         Completeness = completeness;
     }
 
@@ -90,6 +92,7 @@ public sealed class NsvSectorMonitorFleet
     public string GridPath { get; }
     public string State { get; }
     public string? NodeId { get; }
+    public string? Faction { get; }
     public float Completeness { get; }
 }
 
@@ -140,16 +143,23 @@ public static class NsvSectorMonitorEuiMsg
     }
 
     [Serializable, NetSerializable]
+    public sealed class StartOutcomeVoteRequest : EuiMessageBase
+    {
+    }
+
+    [Serializable, NetSerializable]
     public sealed class SpawnDataFleetRequest : EuiMessageBase
     {
-        public SpawnDataFleetRequest(string starmapId, string nodeId)
+        public SpawnDataFleetRequest(string starmapId, string nodeId, string faction)
         {
             StarmapId = starmapId;
             NodeId = nodeId;
+            Faction = faction;
         }
 
         public string StarmapId { get; }
         public string NodeId { get; }
+        public string Faction { get; }
     }
 
     [Serializable, NetSerializable]

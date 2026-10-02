@@ -1,11 +1,9 @@
 using System.Linq;
 using Content.Server._Mono.Radar;
 using Content.Server._NSV.Bluespace.Sectors;
-using Content.Server.CartridgeLoader;
 using Content.Shared._Mono.Radar;
 using Content.Shared._NSV.Bluespace.Encounters;
 using Content.Shared._NSV.Bluespace.Sectors;
-using Content.Shared.CartridgeLoader;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Prototypes;
 
@@ -13,39 +11,26 @@ namespace Content.Server._NSV.Bluespace.Encounters;
 
 public sealed class NsvBluespacePatrolContractSystem : EntitySystem
 {
-    private static readonly ProtoId<NsvBluespaceEncounterPrototype> PatrolContract = "NSVPatrolContract";
     private static readonly ProtoId<NsvBluespaceFactionPrototype> FederalFaction = "NSVFederal";
     private static readonly ProtoId<NsvBluespaceFactionPrototype> HostileFaction = "NSVHostile";
 
-    [Dependency] private CartridgeLoaderSystem _cartridgeLoader = default!;
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
 
     public override void Initialize()
     {
+        SubscribeLocalEvent<NsvBluespaceEncounterArrivalEvent>(OnArrival);
         SubscribeLocalEvent<NsvEncounterPatrolCoreObjectiveComponent, EntityTerminatingEvent>(OnPatrolCoreTerminating);
     }
 
-    public void OnSectorArrival(EntityUid sectorMap, EntityUid shuttleUid)
+    private void OnArrival(NsvBluespaceEncounterArrivalEvent ev)
     {
-        if (!TryComp<NsvBluespaceSectorInstanceComponent>(sectorMap, out var sector))
+        if (ev.Kind != NsvBluespaceEncounterKind.Destroy)
             return;
 
-        ProtoId<NsvBluespaceEncounterPrototype> definitionId = sector.EncounterDefinitionId;
-        if (string.IsNullOrEmpty(definitionId))
-        {
-            if (!string.IsNullOrEmpty(sector.StarmapId))
-                return;
-
-            definitionId = PatrolContract;
-        }
-
-        if (definitionId != PatrolContract ||
-            !_encounters.TryGetOrCreate(sectorMap, definitionId, shuttleUid, out var controllerUid, out var created, out _))
-        {
+        if (!_encounters.TryGetOrCreate(ev.SectorMap, ev.DefinitionId, ev.Shuttle, out var controllerUid, out var created, out _))
             return;
-        }
 
         if (created && !TryActivate(controllerUid))
             _encounters.Fail(controllerUid);
@@ -122,25 +107,6 @@ public sealed class NsvBluespacePatrolContractSystem : EntitySystem
 
         if (objective.BlipGrid != EntityUid.Invalid)
             RemComp<RadarBlipComponent>(objective.BlipGrid);
-
-        NotifyObjectiveComplete(encounter);
-    }
-
-    private void NotifyObjectiveComplete(NsvBluespaceEncounterComponent encounter)
-    {
-        var header = Loc.GetString("nsv-bluespace-encounter-complete-header");
-        var message = Loc.GetString("nsv-bluespace-encounter-complete-text");
-        var query = EntityQueryEnumerator<NsvBluespaceNavigationCartridgeComponent, CartridgeComponent, TransformComponent>();
-        while (query.MoveNext(out _, out _, out var cartridge, out var transform))
-        {
-            if (cartridge.LoaderUid is not { } loaderUid || transform.GridUid is not { } gridUid)
-                continue;
-
-            if (!encounter.Participants.Contains(gridUid))
-                continue;
-
-            _cartridgeLoader.SendNotification(loaderUid, header, message);
-        }
     }
 
     private bool TryFindPatrolCore(EntityUid sectorMap, EntityUid gridUid, out EntityUid coreUid)
