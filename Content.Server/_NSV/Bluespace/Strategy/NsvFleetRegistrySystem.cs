@@ -352,7 +352,10 @@ public sealed partial class NsvFleetRegistrySystem : EntitySystem
         // the ship Live instead — this is the shared guard for every de-materialization trigger
         // (sector sleep, damaged retreat, strategic FTL). Ghosts are excluded (they carry a mind but
         // no body to strand), matching the sleep blocker's IsActiveGameplayCharacter.
-        var occupants = EntityQueryEnumerator<MindContainerComponent, TransformComponent>();
+        // Every query in this gate must be an AllEntityQuery: sector sleep pauses the map *before* it
+        // serializes, and the plain EntityQueryEnumerator silently skips paused entities, which would
+        // let a body or an encounter target ride along to the holding map.
+        var occupants = AllEntityQuery<MindContainerComponent, TransformComponent>();
         while (occupants.MoveNext(out var occupant, out var mindContainer, out var xform))
         {
             if (xform.GridUid != gridUid || !mindContainer.HasMind || HasComp<GhostComponent>(occupant))
@@ -366,7 +369,7 @@ public sealed partial class NsvFleetRegistrySystem : EntitySystem
         // Undocking is a safe, executable fix; run it up front so a merely-docked ship departs.
         _docking.UndockDocks(gridUid);
 
-        var query = EntityQueryEnumerator<NsvBluespaceEncounterComponent>();
+        var query = AllEntityQuery<NsvBluespaceEncounterComponent>();
         while (query.MoveNext(out _, out var encounter))
         {
             if (encounter.State is NsvBluespaceEncounterState.Failed or NsvBluespaceEncounterState.Disposed)
@@ -393,7 +396,7 @@ public sealed partial class NsvFleetRegistrySystem : EntitySystem
         // Multi-target kinds (ClearSystem) don't use the single ObjectiveTarget field; every kind tags
         // its targets with an ObjectiveTarget member role instead. Moving such a grid away would leave
         // the objective unreachable and the crew's extraction locked for good.
-        var members = EntityQueryEnumerator<NsvBluespaceEncounterMemberComponent, TransformComponent>();
+        var members = AllEntityQuery<NsvBluespaceEncounterMemberComponent, TransformComponent>();
         while (members.MoveNext(out _, out var member, out var xform))
         {
             if (xform.GridUid != gridUid ||
@@ -684,10 +687,15 @@ public sealed partial class NsvFleetRegistrySystem : EntitySystem
         return ship.FullComplementTurretCount * completeness;
     }
 
+    /// <remarks>
+    /// AllEntityQuery on purpose: the strategy spawner registers ships while they sit on a paused scratch
+    /// map, and the plain enumerator skips paused entities — it read every spawned ship as turretless,
+    /// so abstract combat never fired.
+    /// </remarks>
     private int CountTurrets(EntityUid gridUid)
     {
         var turrets = 0;
-        var query = EntityQueryEnumerator<FireControllableComponent, TransformComponent>();
+        var query = AllEntityQuery<FireControllableComponent, TransformComponent>();
         while (query.MoveNext(out _, out _, out var xform))
         {
             if (xform.GridUid == gridUid)
@@ -718,7 +726,7 @@ public sealed partial class NsvFleetRegistrySystem : EntitySystem
             }
         }
 
-        var query = EntityQueryEnumerator<NsvBluespaceEncounterComponent>();
+        var query = AllEntityQuery<NsvBluespaceEncounterComponent>();
         while (query.MoveNext(out _, out var encounter))
         {
             if (encounter.State is NsvBluespaceEncounterState.Failed or NsvBluespaceEncounterState.Disposed)

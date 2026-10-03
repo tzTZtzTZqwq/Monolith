@@ -751,6 +751,81 @@ public sealed class NsvFleetRegistrySystemTest
     }
 
     /// <summary>
+    /// The exit gate must see entities on a <b>paused</b> map: sector sleep pauses the map before it
+    /// serializes the resident fleet, and a plain entity query skips paused entities. Both a
+    /// player-bound body and a live encounter objective target on a paused grid must still block.
+    /// </summary>
+    [Test]
+    public async Task SerializeGateSeesPausedOccupantsAndTargets()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings { Dirty = true });
+        var server = pair.Server;
+        var testMap = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var mapSystem = entityManager.System<SharedMapSystem>();
+        var transform = entityManager.System<SharedTransformSystem>();
+        var mindSystem = entityManager.System<SharedMindSystem>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            // Ship A: a player-bound body aboard.
+            var boarded = SpawnAnchoredOccupant(entityManager, mapManager, mapSystem, transform, testMap.MapId, out var body);
+            var mind = mindSystem.CreateMind(null);
+            mindSystem.TransferTo(mind, body, mind: mind);
+            var boardedShip = fleets.RegisterShip(boarded, new ResPath("/Maps/_NSV/a.yml"));
+
+            // Ship B: an AI core tagged as a running encounter's objective target (the role every
+            // encounter kind uses, including ClearSystem's multiple targets).
+            var targeted = SpawnAnchoredOccupant(entityManager, mapManager, mapSystem, transform, testMap.MapId, out var core);
+            var controller = entityManager.SpawnEntity(null, MapCoordinates.Nullspace);
+            var encounter = entityManager.AddComponent<NsvBluespaceEncounterComponent>(controller);
+            encounter.State = NsvBluespaceEncounterState.Active;
+            var member = entityManager.AddComponent<NsvBluespaceEncounterMemberComponent>(core);
+            member.Controller = controller;
+            member.Role = NsvBluespaceEncounterMemberRole.ObjectiveTarget;
+            var targetedShip = fleets.RegisterShip(targeted, new ResPath("/Maps/_NSV/b.yml"));
+
+            // What sector sleep does before serializing.
+            mapSystem.SetPaused(testMap.MapId, true);
+            Assert.That(entityManager.GetComponent<MetaDataComponent>(body).EntityPaused, Is.True);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(fleets.TrySerializeShip(boardedShip.Id, out _), Is.False, "paused body must still block");
+                Assert.That(fleets.TrySerializeShip(targetedShip.Id, out _), Is.False, "paused objective target must still block");
+                Assert.That(boardedShip.State, Is.EqualTo(NsvFleetShipState.Live));
+                Assert.That(targetedShip.State, Is.EqualTo(NsvFleetShipState.Live));
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    /// A one-tile grid with an entity anchored on it, so the entity's GridUid pins to the grid in the
+    /// tickless harness.
+    /// </summary>
+    private static EntityUid SpawnAnchoredOccupant(
+        IEntityManager entityManager,
+        IMapManager mapManager,
+        SharedMapSystem mapSystem,
+        SharedTransformSystem transform,
+        MapId mapId,
+        out EntityUid occupant)
+    {
+        var gridEnt = mapManager.CreateGridEntity(mapId);
+        mapSystem.SetTile(gridEnt, new Vector2i(0, 0), new Tile(1));
+        occupant = entityManager.SpawnEntity(null, new EntityCoordinates(gridEnt.Owner, new Vector2(0.5f, 0.5f)));
+        transform.AnchorEntity(
+            (occupant, entityManager.GetComponent<TransformComponent>(occupant)),
+            (gridEnt.Owner, gridEnt.Comp),
+            new Vector2i(0, 0));
+        return gridEnt.Owner;
+    }
+
+    /// <summary>
     /// A Live record whose grid has vanished (e.g. a spawn or first-visit materialization that failed
     /// and deleted its map) must not freeze abstract combat at its node forever: the combat gate
     /// demotes it to Missing. An aborted record can also be discarded outright, leaving no trace.

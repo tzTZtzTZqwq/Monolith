@@ -1,3 +1,4 @@
+using System.Linq;
 using Content.Server._NSV.Bluespace.Sectors;
 using Content.Server._NSV.Bluespace.Strategy;
 using Content.Server._NSV.GameRule;
@@ -59,6 +60,60 @@ public sealed class NsvStrategyFleetSpawnerTest
             // A second pass tops nothing up: the node is already at target.
             spawner.ScanAndSpawn();
             Assert.That(CountAvailableAt(fleets, node), Is.EqualTo(3), "idempotent at target");
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    /// End to end with the real data ship: spawned ships must be photographed with their turrets
+    /// (they're registered on a paused scratch map, which a plain entity query can't see), and a
+    /// contested Federal node must then actually fight. Previously every spawned ship read zero
+    /// power, so abstract combat silently never happened and fleets stayed at 100%.
+    /// </summary>
+    [Test]
+    public async Task SpawnedShipsHaveTurretsAndFight()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var sysMan = server.ResolveDependency<IEntitySystemManager>();
+        var cfg = server.ResolveDependency<IConfigurationManager>();
+        var gameTicker = sysMan.GetEntitySystem<GameTicker>();
+        var spawner = sysMan.GetEntitySystem<NsvStrategyFleetSpawnerSystem>();
+        var combat = sysMan.GetEntitySystem<NsvAbstractCombatSystem>();
+        var fleets = sysMan.GetEntitySystem<NsvFleetRegistrySystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            // Drive both passes by hand; keep the timers from adding passes of their own.
+            cfg.SetCVar(NsvCCVars.StrategyFleetSpawnInterval, 0f);
+            cfg.SetCVar(NsvCCVars.StrategyCombatInterval, 0f);
+            Assert.That(gameTicker.StartGameRule("NsvCampaign"), Is.True);
+            spawner.ScanAndSpawn();
+
+            // Sol is a Federal node: a Federal garrison plus a Hostile incursion share it.
+            var node = new NsvFleetNodeKey(StrategicMapId, "Sol");
+            var ships = fleets.GetResidentShips(node).ToList();
+            Assert.That(ships, Has.Count.GreaterThanOrEqualTo(2));
+            foreach (var shipId in ships)
+            {
+                Assert.That(fleets.TryGetShip(shipId, out var ship), Is.True);
+                Assert.That(ship.FullComplementTurretCount, Is.GreaterThan(0), $"{shipId} was photographed without turrets");
+                Assert.That(fleets.GetDataCombatPower(shipId), Is.GreaterThan(0f));
+            }
+
+            combat.ResolveAll();
+
+            var damaged = ships.Count(shipId =>
+                fleets.TryGetShip(shipId, out var ship) &&
+                (ship.State == NsvFleetShipState.Destroyed || fleets.GetCompleteness(shipId) < 1f));
+            Assert.That(damaged, Is.GreaterThanOrEqualTo(1), "one combat pass must damage the loser");
         });
 
         await pair.CleanReturnAsync();
