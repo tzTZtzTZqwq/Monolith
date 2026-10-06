@@ -18,6 +18,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
     [Dependency] private NsvBluespaceSectorLifecycleSystem _lifecycle = default!;
     [Dependency] private NsvBluespaceSectorTravelSystem _travel = default!;
     [Dependency] private NsvCampaignRuleSystem _campaign = default!;
+    [Dependency] private NsvFtlInterdictionSystem _interdiction = default!;
     [Dependency] private SharedPopupSystem _popup = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
     [Dependency] private IRobustRandom _random = default!;
@@ -35,6 +36,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _encounters.SectorDisplayChanged += RefreshSector;
         _lifecycle.SectorDisplayChanged += RefreshSector;
         _campaign.CampaignDisplayChanged += RefreshAllConsoles;
+        _interdiction.InterdictionChanged += RefreshSector;
     }
 
     public override void Shutdown()
@@ -44,6 +46,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _encounters.SectorDisplayChanged -= RefreshSector;
         _lifecycle.SectorDisplayChanged -= RefreshSector;
         _campaign.CampaignDisplayChanged -= RefreshAllConsoles;
+        _interdiction.InterdictionChanged -= RefreshSector;
         base.Shutdown();
     }
 
@@ -195,10 +198,12 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             encounterProgress = _encounters.GetProgress(sector!.EncounterController);
         }
 
+        var interdicted = shuttleUid != null && _interdiction.IsInterdicted(shuttleUid.Value, out _);
         var canLeaveCurrentNode = sector != null &&
                                   shuttleUid != null &&
                                   sector.ForeignGrids.Contains(shuttleUid.Value) &&
-                                  _encounters.CanReturn(sectorMap, shuttleUid.Value, out _);
+                                  _encounters.CanReturn(sectorMap, shuttleUid.Value, out _) &&
+                                  !interdicted;
         var canReturnToDeparture = canLeaveCurrentNode &&
                                    sector!.ReturnDestinations.ContainsKey(shuttleUid!.Value);
         var starmapNodes = BuildStarmapNodes(starmap, currentNodeId, sector, canLeaveCurrentNode);
@@ -219,7 +224,8 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             currentNodeId,
             canReturnToDeparture,
             _campaign.TryBuildSummary(),
-            encounterProgress);
+            encounterProgress,
+            interdicted);
     }
 
     private List<NsvBluespaceStarmapNodeState> BuildStarmapNodes(

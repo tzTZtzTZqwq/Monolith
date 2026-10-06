@@ -1,6 +1,7 @@
 using Content.Server._NSV.Bluespace.Strategy;
 using Content.Server._NSV.GameRule.Components;
 using Content.Server.Chat.Managers;
+using Content.Server.Chat.Systems;
 using Content.Server.GameTicking;
 using Content.Server.GameTicking.Rules;
 using Content.Server.RoundEnd;
@@ -40,7 +41,12 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     private const string ExtendOption = "extend";
     private const string EndOption = "end";
 
+    // Stalled-objective reminders (N6): 1 warns, FirstPenaltyStage..4 deduct score, 5 = blockade.
+    private const int MaxReminderStage = 5;
+    private const int FirstPenaltyStage = 2;
+
     [Dependency] private IChatManager _chat = default!;
+    [Dependency] private ChatSystem _chatSystem = default!;
     [Dependency] private IVoteManager _votes = default!;
     [Dependency] private RoundEndSystem _roundEnd = default!;
     [Dependency] private IConfigurationManager _cfg = default!;
@@ -93,10 +99,126 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
         if (GameTicker.RunLevel != GameRunLevel.InRound || component.Phase == NsvCampaignPhase.Ended)
             return;
 
+        component.ActiveTime += frameTime;
         if (TickExtension(component, frameTime))
             return;
 
+        TickBriefing(component);
+        TickReminders(component, frameTime);
         TickThreatGrowth(component, frameTime);
+    }
+
+    /// <summary>
+    /// Announces Naval Command's mission briefing once, a short delay into the campaign (NSV13
+    /// ROUND-005): the round objectives plus how the operation is won and lost.
+    /// </summary>
+    private void TickBriefing(NsvCampaignRuleComponent component)
+    {
+        var delay = _cfg.GetCVar(NsvCCVars.CampaignBriefingDelay);
+        if (component.BriefingDelivered || delay < 0f || component.ActiveTime < delay)
+            return;
+
+        component.BriefingDelivered = true;
+
+        var lines = new List<string> { Loc.GetString("nsv-campaign-briefing-intro") };
+        foreach (var objective in component.Objectives)
+        {
+            lines.Add(Loc.GetString("nsv-campaign-briefing-objective",
+                ("objective", GetObjectiveBrief(objective))));
+        }
+
+        lines.Add(Loc.GetString("nsv-campaign-briefing-victory",
+            ("threshold", _cfg.GetCVar(NsvCCVars.CampaignVictoryScoreThreshold))));
+        lines.Add(Loc.GetString("nsv-campaign-briefing-defeat"));
+        Announce(string.Join("\n", lines));
+    }
+
+    /// <summary>
+    /// Escalating reminders while objectives stall (NSV13 ROUND-006). Each interval without progress
+    /// delivers the next reminder: 1 warns, 2–4 also deduct victory score, 5 sends a blockade fleet to
+    /// the crew; the cycle then wraps to 1. Only runs while the campaign is undecided — once the
+    /// outcome vote starts or the round is extending, there's nothing left to push toward.
+    /// </summary>
+    internal void TickReminders(NsvCampaignRuleComponent component, float frameTime)
+    {
+        var interval = _cfg.GetCVar(NsvCCVars.CampaignReminderInterval);
+        if (interval <= 0f ||
+            component.Phase != NsvCampaignPhase.Active ||
+            component.Outcome != NsvCampaignOutcome.None)
+        {
+            return;
+        }
+
+        component.StallTime += frameTime;
+        while (component.StallTime >= interval)
+        {
+            component.StallTime -= interval;
+            component.ReminderStage = component.ReminderStage % MaxReminderStage + 1;
+            DeliverReminder(component, component.ReminderStage);
+        }
+    }
+
+    private void DeliverReminder(NsvCampaignRuleComponent component, int stage)
+    {
+        if (stage < MaxReminderStage)
+        {
+            var penalty = 0;
+            if (stage >= FirstPenaltyStage)
+            {
+                penalty = Math.Min(component.Score, Math.Max(0, _cfg.GetCVar(NsvCCVars.CampaignReminderScorePenalty)));
+                if (penalty > 0)
+                {
+                    component.Score -= penalty;
+                    CampaignDisplayChanged?.Invoke();
+                }
+            }
+
+            Announce(Loc.GetString($"nsv-campaign-reminder-{stage}", ("penalty", penalty)));
+            return;
+        }
+
+        var blockade = new NsvCampaignBlockadeEvent();
+        RaiseLocalEvent(ref blockade);
+        if (blockade.Dispatched)
+        {
+            Announce(Loc.GetString("nsv-campaign-reminder-blockade"));
+            return;
+        }
+
+        if (AdjustThreat(component, _cfg.GetCVar(NsvCCVars.CampaignBlockadeFallbackThreat)))
+            CampaignDisplayChanged?.Invoke();
+
+        Announce(Loc.GetString("nsv-campaign-reminder-blockade-fallback"));
+    }
+
+    /// <summary>
+    /// Objective progress restarts the stall clock and the reminder escalation.
+    /// </summary>
+    private static void ResetReminders(NsvCampaignRuleComponent component)
+    {
+        component.StallTime = 0f;
+        component.ReminderStage = 0;
+    }
+
+    /// <summary>
+    /// A campaign-wide announcement from Naval Command (briefing, reminders).
+    /// </summary>
+    private void Announce(string message)
+    {
+        _chatSystem.DispatchGlobalAnnouncement(
+            message,
+            Loc.GetString("nsv-campaign-command-sender"),
+            colorOverride: Color.Gold);
+    }
+
+    private string GetObjectiveBrief(NsvCampaignObjective objective)
+    {
+        return objective.Kind switch
+        {
+            NsvCampaignObjectiveKind.PerformJumps => Loc.GetString("nsv-campaign-briefing-performjumps",
+                ("target", objective.Target)),
+            _ => Loc.GetString(GetObjectiveLabel(objective.Kind)),
+        };
     }
 
     /// <summary>
@@ -130,8 +252,6 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
     /// </summary>
     private void TickThreatGrowth(NsvCampaignRuleComponent component, float frameTime)
     {
-        component.ActiveTime += frameTime;
-
         var interval = _cfg.GetCVar(NsvCCVars.CampaignThreatGrowthInterval);
         if (interval <= 0f || component.ActiveTime < _cfg.GetCVar(NsvCCVars.CampaignThreatGracePeriod))
             return;
@@ -169,6 +289,7 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
 
                 objective.Tally++;
                 changed = true;
+                ResetReminders(campaign.Comp);
                 if (objective.Tally >= objective.Target)
                 {
                     objective.Status = NsvCampaignObjectiveStatus.Completed;
@@ -218,6 +339,7 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
         foreach (var campaign in LiveCampaigns())
         {
             campaign.Comp.Score += node.Reward;
+            ResetReminders(campaign.Comp);
             awarded = true;
         }
 

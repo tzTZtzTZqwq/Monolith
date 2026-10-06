@@ -110,6 +110,47 @@ public sealed class NsvCCVars
         CVarDef.Create("nsv.campaign.extension_duration", 3600f, CVar.SERVERONLY | CVar.ARCHIVE);
 
     /// <summary>
+    /// Seconds after the campaign starts before Naval Command's mission briefing is announced
+    /// (NSV13 ROUND-005). Negative disables the briefing.
+    /// </summary>
+    public static readonly CVarDef<float> CampaignBriefingDelay =
+        CVarDef.Create("nsv.campaign.briefing_delay", 180f, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Seconds without objective progress between escalating Naval Command reminders (NSV13
+    /// ROUND-006). Progress (a jump counted toward an objective, or a completed encounter) restarts
+    /// the clock and the escalation. 0 or less disables reminders.
+    /// </summary>
+    public static readonly CVarDef<float> CampaignReminderInterval =
+        CVarDef.Create("nsv.campaign.reminder_interval", 900f, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Victory score deducted by each of reminders 2–4 (floored at 0).
+    /// </summary>
+    public static readonly CVarDef<int> CampaignReminderScorePenalty =
+        CVarDef.Create("nsv.campaign.reminder_score_penalty", 1, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Number of hostile interdictor ships in the blockade fleet that reminder 5 sends to the crew's
+    /// current sector.
+    /// </summary>
+    public static readonly CVarDef<int> CampaignBlockadeSize =
+        CVarDef.Create("nsv.campaign.blockade_size", 2, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// How far from the crew's ship (metres) the blockade fleet arrives.
+    /// </summary>
+    public static readonly CVarDef<float> CampaignBlockadeDistance =
+        CVarDef.Create("nsv.campaign.blockade_distance", 400f, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Threat added instead when reminder 5 can't place a blockade because the crew isn't in a
+    /// bluespace sector.
+    /// </summary>
+    public static readonly CVarDef<float> CampaignBlockadeFallbackThreat =
+        CVarDef.Create("nsv.campaign.blockade_fallback_threat", 5f, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
     /// Seconds a Hold encounter requires the crew to survive in a hostile node before it completes.
     /// Extraction stays gated for the whole duration, so this is how long the crew is pinned under fire.
     /// </summary>

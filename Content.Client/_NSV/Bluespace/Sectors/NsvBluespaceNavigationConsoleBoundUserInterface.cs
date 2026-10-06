@@ -126,6 +126,10 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
                 : "nsv-bluespace-console-extraction-locked");
         }
 
+        // Interdiction blocks leaving regardless of the encounter, so it overrides the extraction line.
+        if (state.Interdicted)
+            EncounterExtractionValue.Text = Loc.GetString("nsv-bluespace-console-extraction-interdicted");
+
         StarmapControl.SetNodes(state.StarmapNodes, _selectedNodeId);
         if (_selectedNodeId != null && state.StarmapNodes.All(node => node.Id != _selectedNodeId))
             _selectedNodeId = null;

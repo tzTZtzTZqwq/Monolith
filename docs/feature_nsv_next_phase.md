@@ -82,6 +82,14 @@
 - **成本：** M（寻路加计时器，复用现成 API）。
 
 #### N6. 任务简报 + 目标停滞催促
+
+> **实现状态：✅ 已实现（2026-10-06）。** 落点在 `NsvCampaignRuleSystem`：
+> - **简报：** campaign 开始 `nsv.campaign.briefing_delay`（默认 180s，负数关闭）后，以「Naval Command」名义全服公告一次，列出回合目标、胜利条件（回 Home 且分数 ≥ 阈值）和失败条件（旗舰被毁）。
+> - **催促：** `nsv.campaign.reminder_interval`（默认 900s，≤0 关闭）内没有目标进展就发下一级提醒：第 1 级只警告；第 2–4 级每次扣 `reminder_score_penalty`（默认 1）分，最低到 0；第 5 级广播 `NsvCampaignBlockadeEvent`，由 `NsvCampaignBlockadeSystem` 往船员当前星区派封锁舰队（`blockade_size` 艘，默认 2；距船员 `blockade_distance` 米，默认 400），每艘的 AI 核心都是 FTL 拦截器（见 N7）。船员不在任何蓝空星区时改为加威胁（`blockade_fallback_threat`，默认 5）。之后从第 1 级循环。
+> - **算作进展的事：** 跳跃计入目标、完成遭遇。两者都会把停滞计时和提醒级别清零。
+> - **只在胜负未定时运行：** 投票开始（Outcome 已定）或进入延长阶段后不再催促。
+> - **封锁舰的生成方式：** 直接把 gust_2 加载进船员所在的活星区（与星区舰船生成器相同），**不走**「停放 → 物化」，因为停放到暂存地图时锚定实体会脱离网格，核心可能不随船回来。舰船登记为该节点驻留舰，随星区休眠、唤醒。
+> - **测试：** `NsvCampaignRuleTest.BriefingAnnouncedAfterDelay`、`StalledObjectivesEscalateAndProgressResets`，`NsvFtlInterdictionTest.BlockadeArrivesAtCrewSectorAndInterdicts`。
 - **参考：** 01 ROUND-005/006，06 MISSION-002/003（即 v2 计划中的 S9）。
 - **NSV13：** 开局约 3 分钟打印任务简报；之后每 15 分钟没有进展就升级警告，第 5 次直接在船员所在星系刷一支封锁舰队。
 - **现状：** `NsvCampaignRuleSystem` 只有被动威胁增长，没有简报，没有催促，也没有惩罚。
@@ -89,6 +97,13 @@
 - **成本：** S，性价比最高。
 
 #### N7. 拦截舰阻断跃迁（+ 紧急跃迁）
+
+> **实现状态：✅ 拦截已实现（2026-10-06）；紧急跃迁未做。** 新组件 `NsvFtlInterdictorComponent` + `NsvFtlInterdictionSystem`（`Content.Server/_NSV/Bluespace/Sectors/`）：
+> - **判定：** 同一张地图上存在带拦截器组件、未被删除、**有电**、且阵营与该船敌对的实体时，船被拦截。组件挂在 AI 核心上，所以打掉或打断电核心即可解除。
+> - **拦截范围：** 蓝空导航的「跳往节点」「返航」两条路径（`NsvBluespaceSectorTravelSystem`），以及普通穿梭机控制台 FTL（订阅 `ConsoleFTLAttemptEvent`）。
+> - **导航台：** 被拦截时跳跃和返航按钮禁用，撤离一栏显示 "Interdicted: destroy the hostile interdictor to jump out."；拦截器出现或消失时自动刷新所在星区的控制台。
+> - **目前的来源：** N6 的封锁舰队。组件可以直接写进任意原型，给特定敌舰或遭遇加拦截。
+> - **测试：** `NsvFtlInterdictionTest.HostileInterdictorBlocksFtlUntilDestroyed`（友方拦截器不拦、敌方拦截器同时挡住控制台 FTL、删掉核心后解除）。
 - **参考：** 04 FTL-011/012/006/007。
 - **NSV13：** 同星系有敌方拦截舰时，正常跃迁被阻断；紧急跃迁需要双卡授权，能绕过拦截，代价是随机落点加结构损伤。
 - **现状：** 只有遭遇状态会限制撤离。`ConsoleFTLAttemptEvent` 的订阅者只有 `_NF/ForceAnchorSystem`、Nukeops 和 Salvage，NSV 没有订阅。
@@ -139,7 +154,7 @@
 
 | 阶段 | 内容 | 理由 |
 | --- | --- | --- |
-| P1 | N6 简报 + 催促，N7 拦截舰 | 都是 S，在现有 campaign / 遭遇代码上马上见效 |
+| P1 ✅ | N6 简报 + 催促，N7 拦截舰（2026-10-06 完成） | 都是 S，在现有 campaign / 遭遇代码上马上见效 |
 | P2 | N1 旗舰出生 + 岗位 | 后续一切的前提；完成后旗舰自动指定 |
 | P3 | N2 故障 + 降级，N3 临界倒计时，N4 FTL 资源 | 一起交付 M2 的 Engineer 与损管玩法 |
 | P4 | N5 舰队移动，N8 更多回合目标 | 星图动起来，每局有变化；补上 S8「extend 追加目标」 |

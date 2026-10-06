@@ -126,6 +126,9 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
     public readonly NsvCampaignSummaryState? Campaign;
     public readonly NsvBluespaceEncounterProgressState? EncounterProgress;
 
+    // A hostile FTL interdictor in this sector is holding the shuttle in place.
+    public readonly bool Interdicted;
+
     public NsvBluespaceNavigationConsoleState(
         string sectorName,
         string sectorDescription,
@@ -143,7 +146,8 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         string? currentNodeId = null,
         bool canReturnToDeparture = false,
         NsvCampaignSummaryState? campaign = null,
-        NsvBluespaceEncounterProgressState? encounterProgress = null)
+        NsvBluespaceEncounterProgressState? encounterProgress = null,
+        bool interdicted = false)
     {
         SectorName = sectorName;
         SectorDescription = sectorDescription;
@@ -162,6 +166,7 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         CanReturnToDeparture = canReturnToDeparture;
         Campaign = campaign;
         EncounterProgress = encounterProgress;
+        Interdicted = interdicted;
     }
 }
 

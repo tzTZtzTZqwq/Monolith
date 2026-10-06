@@ -345,6 +345,114 @@ public sealed class NsvCampaignRuleTest
     }
 
     /// <summary>
+    ///     Naval Command's mission briefing is announced once, after the configured delay.
+    /// </summary>
+    [Test]
+    public async Task BriefingAnnouncedAfterDelay()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var cfg = server.ResolveDependency<IConfigurationManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var ruleUid = EntityUid.Invalid;
+
+        await server.WaitAssertion(() =>
+        {
+            cfg.SetCVar(NsvCCVars.CampaignBriefingDelay, 0.1f);
+            Assert.That(gameTicker.StartGameRule("NsvCampaign", out ruleUid), Is.True);
+            Assert.That(entityManager.GetComponent<NsvCampaignRuleComponent>(ruleUid).BriefingDelivered, Is.False);
+        });
+
+        await server.WaitRunTicks(30);
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(entityManager.GetComponent<NsvCampaignRuleComponent>(ruleUid).BriefingDelivered, Is.True);
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    ///     Stalled objectives escalate (NSV13 ROUND-006): reminder 1 warns, 2–4 each withhold victory
+    ///     score, 5 sends a blockade — or, with the crew outside any bluespace sector, raises threat —
+    ///     and the cycle then wraps. Objective progress resets the escalation.
+    /// </summary>
+    [Test]
+    public async Task StalledObjectivesEscalateAndProgressResets()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var cfg = server.ResolveDependency<IConfigurationManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var campaign = entityManager.System<NsvCampaignRuleSystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            const float interval = 10f;
+            cfg.SetCVar(NsvCCVars.CampaignReminderInterval, interval);
+            cfg.SetCVar(NsvCCVars.CampaignReminderScorePenalty, 1);
+            cfg.SetCVar(NsvCCVars.CampaignBlockadeFallbackThreat, 5f);
+            Assert.That(gameTicker.StartGameRule("NsvCampaign", out var ruleUid), Is.True);
+            var rule = entityManager.GetComponent<NsvCampaignRuleComponent>(ruleUid);
+
+            // alpha-3 rewards 4, giving the penalties something to withhold.
+            campaign.NotifyEncounterComplete("NSVBluespaceStrategicMap", "alpha-3");
+            Assert.That(rule.Score, Is.EqualTo(4));
+
+            campaign.TickReminders(rule, interval);
+            Assert.Multiple(() =>
+            {
+                Assert.That(rule.ReminderStage, Is.EqualTo(1));
+                Assert.That(rule.Score, Is.EqualTo(4), "the first reminder only warns");
+            });
+
+            for (var i = 0; i < 3; i++)
+                campaign.TickReminders(rule, interval);
+            Assert.Multiple(() =>
+            {
+                Assert.That(rule.ReminderStage, Is.EqualTo(4));
+                Assert.That(rule.Score, Is.EqualTo(1), "reminders 2-4 each withhold one point");
+            });
+
+            var threatBefore = rule.ThreatElevation;
+            campaign.TickReminders(rule, interval);
+            Assert.Multiple(() =>
+            {
+                Assert.That(rule.ReminderStage, Is.EqualTo(5));
+                Assert.That(rule.ThreatElevation, Is.EqualTo(threatBefore + 5f),
+                    "no crew in a sector, so the blockade falls back to threat");
+            });
+
+            campaign.TickReminders(rule, interval);
+            Assert.That(rule.ReminderStage, Is.EqualTo(1), "the escalation wraps after the blockade");
+
+            campaign.NotifyJumpArrived();
+            Assert.Multiple(() =>
+            {
+                Assert.That(rule.ReminderStage, Is.EqualTo(0), "objective progress resets the escalation");
+                Assert.That(rule.StallTime, Is.EqualTo(0f));
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
     ///     An "extend" vote keeps the round going for the configured extension, after which the
     ///     campaign concludes and the round ends. A tie or "end" result ends the round straight away.
     /// </summary>

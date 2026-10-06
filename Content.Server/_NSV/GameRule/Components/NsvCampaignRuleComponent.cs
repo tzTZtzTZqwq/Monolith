@@ -56,4 +56,24 @@ public sealed partial class NsvCampaignRuleComponent : Component
 
     // The in-flight outcome vote, cancelled if the rule ends before the vote finishes.
     public IVoteHandle? OutcomeVote;
+
+    // Whether Naval Command's mission briefing has been announced (ROUND-005, N6).
+    [ViewVariables]
+    public bool BriefingDelivered;
+
+    // Seconds since the last objective progress; drives the escalating reminders (ROUND-006, N6).
+    [ViewVariables]
+    public float StallTime;
+
+    // Last reminder delivered in the current stall, 0–5; wraps back to 1 after the blockade (5).
+    [ViewVariables]
+    public int ReminderStage;
 }
+
+/// <summary>
+/// Raised (broadcast) by the final stalled-objective reminder to send a blockade fleet to the crew.
+/// Whichever system can place one sets <see cref="Dispatched"/>; if nobody does (the crew isn't in a
+/// bluespace sector), the campaign falls back to raising threat.
+/// </summary>
+[ByRefEvent]
+public record struct NsvCampaignBlockadeEvent(bool Dispatched = false);

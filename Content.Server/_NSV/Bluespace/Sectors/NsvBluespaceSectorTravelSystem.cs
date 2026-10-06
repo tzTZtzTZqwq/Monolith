@@ -21,6 +21,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
     [Dependency] private NsvCampaignRuleSystem _campaign = default!;
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
+    [Dependency] private NsvFtlInterdictionSystem _interdiction = default!;
     [Dependency] private NsvBluespaceSectorSystem _sectors = default!;
     [Dependency] private ShuttleSystem _shuttle = default!;
 
@@ -105,8 +106,11 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
                 return false;
             }
 
-            if (!_encounters.CanReturn(sourceMapUid, shuttleUid, out reason))
+            if (!_encounters.CanReturn(sourceMapUid, shuttleUid, out reason) ||
+                _interdiction.IsInterdicted(shuttleUid, out reason))
+            {
                 return false;
+            }
 
             if (!sourceSector.ReturnDestinations.TryGetValue(shuttleUid, out returnCoordinates) ||
                 !sourceSector.ForeignGridFactionSnapshots.TryGetValue(shuttleUid, out factionSnapshot))
@@ -262,8 +266,11 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
 
     private bool TryReturn(EntityUid shuttleUid, EntityUid sectorMap, EntityCoordinates returnCoordinates, out string? reason)
     {
-        if (!_encounters.CanReturn(sectorMap, shuttleUid, out reason))
+        if (!_encounters.CanReturn(sectorMap, shuttleUid, out reason) ||
+            _interdiction.IsInterdicted(shuttleUid, out reason))
+        {
             return false;
+        }
 
         if (!TryComp<ShuttleComponent>(shuttleUid, out var shuttle))
         {
