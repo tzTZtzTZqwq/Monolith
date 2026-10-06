@@ -345,6 +345,70 @@ public sealed class NsvCampaignRuleTest
     }
 
     /// <summary>
+    ///     The admin panel's campaign controls: the view reflects live state, score and threat can be
+    ///     set and nudged (floored at 0), and the briefing / next reminder can be fired on demand.
+    /// </summary>
+    [Test]
+    public async Task AdminControlsAdjustAndBroadcast()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var cfg = server.ResolveDependency<IConfigurationManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var campaign = entityManager.System<NsvCampaignRuleSystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(campaign.GetAdminView(), Is.Null, "no view without a campaign");
+            Assert.That(campaign.AdminSetScore(3), Is.False, "no live campaign to change");
+
+            cfg.SetCVar(NsvCCVars.CampaignReminderScorePenalty, 1);
+            Assert.That(gameTicker.StartGameRule("NsvCampaign"), Is.True);
+
+            Assert.That(campaign.AdminSetScore(6), Is.True);
+            Assert.That(campaign.AdminAdjustScore(-2), Is.True);
+            Assert.That(campaign.AdminSetThreat(7.5f), Is.True);
+            var view = campaign.GetAdminView()!.Value;
+            Assert.Multiple(() =>
+            {
+                Assert.That(view.Summary.Score, Is.EqualTo(4));
+                Assert.That(view.Summary.ThreatElevation, Is.EqualTo(8), "summary threat is rounded");
+                Assert.That(view.BriefingDelivered, Is.False);
+            });
+
+            campaign.AdminAdjustScore(-100);
+            campaign.AdminSetThreat(-3f);
+            view = campaign.GetAdminView()!.Value;
+            Assert.Multiple(() =>
+            {
+                Assert.That(view.Summary.Score, Is.EqualTo(0), "score is floored at 0");
+                Assert.That(view.Summary.ThreatElevation, Is.EqualTo(0), "threat is floored at 0");
+            });
+
+            Assert.That(campaign.AdminAnnounceBriefing(), Is.True);
+            campaign.AdminSetScore(2);
+            Assert.That(campaign.AdminSendNextReminder(), Is.EqualTo(1));
+            Assert.That(campaign.AdminSendNextReminder(), Is.EqualTo(2));
+            view = campaign.GetAdminView()!.Value;
+            Assert.Multiple(() =>
+            {
+                Assert.That(view.BriefingDelivered, Is.True);
+                Assert.That(view.ReminderStage, Is.EqualTo(2));
+                Assert.That(view.Summary.Score, Is.EqualTo(1), "reminder 2 really withholds a point");
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
     ///     Naval Command's mission briefing is announced once, after the configured delay.
     /// </summary>
     [Test]

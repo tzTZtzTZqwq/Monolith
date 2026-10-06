@@ -1,6 +1,7 @@
 using System.Linq;
 using Content.Server._NSV.Bluespace.Sectors;
 using Content.Server._NSV.Bluespace.Strategy;
+using Content.Server._NSV.GameRule;
 using Content.Server.Administration;
 using Content.Server.Administration.Managers;
 using Content.Server.EUI;
@@ -35,12 +36,18 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
         IoCManager.InjectDependencies(this);
     }
 
+    // Result of the last admin action, echoed back in the panel header until the next action.
+    private string? _statusMessage;
+
     public override void Opened()
     {
         base.Opened();
         _adminManager.OnPermsChanged += OnPermsChanged;
+        Campaign.CampaignDisplayChanged += StateDirty;
         StateDirty();
     }
+
+    private NsvCampaignRuleSystem Campaign => _entityManager.System<NsvCampaignRuleSystem>();
 
     private const string StarmapId = "NSVBluespaceStrategicMap";
     private static readonly ResPath DataShipGridPath = new("/SharedMaps/_NSV/Bluespace/gust_2.yml");
@@ -134,7 +141,29 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
             _configuration.GetCVar(NsvCCVars.BluespaceSectorActiveSoftCapacity),
             nodes.ToArray(),
             fleetStates,
-            StarmapId);
+            StarmapId,
+            BuildCampaignState(),
+            _statusMessage);
+    }
+
+    private NsvSectorMonitorCampaign? BuildCampaignState()
+    {
+        if (Campaign.GetAdminView() is not { } view)
+            return null;
+
+        return new NsvSectorMonitorCampaign(
+            view.Summary,
+            view.Outcome.ToString(),
+            view.BriefingDelivered,
+            view.ReminderStage,
+            ToSeconds(view.NextReminderIn),
+            ToSeconds(view.ExtensionRemaining),
+            (int) view.ActiveTime);
+    }
+
+    private static int? ToSeconds(float? seconds)
+    {
+        return seconds is { } value ? (int) MathF.Ceiling(value) : null;
     }
 
     private static bool IsActiveSectorState(NsvBluespaceSectorState state)
@@ -162,22 +191,48 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
                 StateDirty();
                 break;
             case StartOutcomeVoteRequest:
-                _entityManager.System<GameRule.NsvCampaignRuleSystem>().ForceOutcomeVote();
+                Report(Campaign.ForceOutcomeVote() ? "nsv-sector-monitor-status-vote" : "nsv-sector-monitor-status-vote-failed");
+                break;
+            case AdjustScoreRequest score:
+                Report(
+                    score.Absolute ? Campaign.AdminSetScore(score.Amount) : Campaign.AdminAdjustScore(score.Amount),
+                    "nsv-sector-monitor-status-score");
+                break;
+            case AdjustThreatRequest threat:
+                var newThreat = threat.Absolute ? threat.Amount : Campaign.GetThreatElevation() + threat.Amount;
+                Report(Campaign.AdminSetThreat(newThreat), "nsv-sector-monitor-status-threat");
+                break;
+            case AnnounceBriefingRequest:
+                Report(Campaign.AdminAnnounceBriefing(), "nsv-sector-monitor-status-briefing");
+                break;
+            case SendReminderRequest:
+                var stage = Campaign.AdminSendNextReminder();
+                _statusMessage = stage > 0
+                    ? Loc.GetString("nsv-sector-monitor-status-reminder", ("stage", stage))
+                    : Loc.GetString("nsv-sector-monitor-status-no-campaign");
                 StateDirty();
+                break;
+            case DispatchBlockadeRequest:
+                var arrived = _entityManager.System<NsvCampaignBlockadeSystem>().DispatchBlockade();
+                Report(arrived > 0
+                    ? Loc.GetString("nsv-sector-monitor-status-blockade", ("count", arrived))
+                    : Loc.GetString("nsv-sector-monitor-status-blockade-failed"));
                 break;
             case SpawnDataFleetRequest spawn:
-                SpawnDataFleet(spawn.StarmapId, spawn.NodeId, spawn.Faction);
-                StateDirty();
+                Report(SpawnDataFleet(spawn.StarmapId, spawn.NodeId, spawn.Faction, out var spawnFailure)
+                    ? Loc.GetString("nsv-sector-monitor-status-spawned", ("node", spawn.NodeId))
+                    : Loc.GetString("nsv-sector-monitor-status-failed", ("reason", spawnFailure ?? string.Empty)));
                 break;
             case MoveFleetRequest move:
-                _entityManager.System<NsvFleetRegistrySystem>()
-                    .TryMoveShipToNode(move.ShipId, new NsvFleetNodeKey(move.StarmapId, move.NodeId), out _);
-                StateDirty();
+                Report(_entityManager.System<NsvFleetRegistrySystem>()
+                        .TryMoveShipToNode(move.ShipId, new NsvFleetNodeKey(move.StarmapId, move.NodeId), out var moveFailure)
+                    ? Loc.GetString("nsv-sector-monitor-status-moved", ("ship", move.ShipId), ("node", move.NodeId))
+                    : Loc.GetString("nsv-sector-monitor-status-failed", ("reason", moveFailure ?? string.Empty)));
                 break;
         }
     }
 
-    private void SpawnDataFleet(string starmapId, string nodeId, string faction)
+    private bool SpawnDataFleet(string starmapId, string nodeId, string faction, out string? failure)
     {
         var fleets = _entityManager.System<NsvFleetRegistrySystem>();
         var map = _entityManager.System<MapSystem>();
@@ -188,13 +243,21 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
         try
         {
             if (!mapLoader.TryLoadGrid(scratchMap, DataShipGridPath, out var grid))
-                return;
+            {
+                failure = $"Could not load '{DataShipGridPath}'.";
+                return false;
+            }
 
             var ship = fleets.RegisterShip(grid.Value.Owner, DataShipGridPath, new NsvFleetNodeKey(starmapId, nodeId));
             // Empty means "no faction" — leave the grid's faction untouched on wake, as the
             // registry does for sector-parked player/encounter grids.
             ship.Faction = string.IsNullOrEmpty(faction) ? null : faction;
-            fleets.TrySerializeShip(ship.Id, out _);
+            if (fleets.TrySerializeShip(ship.Id, out failure))
+                return true;
+
+            // The grid dies with the scratch map; don't leave a Live record pointing at it.
+            fleets.DiscardShip(ship.Id);
+            return false;
         }
         finally
         {
@@ -203,10 +266,26 @@ public sealed partial class NsvSectorMonitorEui : BaseEui
         }
     }
 
+    /// <summary>
+    /// Records <paramref name="message"/> (a loc id or an already-localized string) as the action
+    /// result and pushes a fresh state.
+    /// </summary>
+    private void Report(string message)
+    {
+        _statusMessage = Loc.TryGetString(message, out var localized) ? localized : message;
+        StateDirty();
+    }
+
+    private void Report(bool succeeded, string successLocId)
+    {
+        Report(succeeded ? successLocId : "nsv-sector-monitor-status-no-campaign");
+    }
+
     public override void Closed()
     {
         base.Closed();
         _adminManager.OnPermsChanged -= OnPermsChanged;
+        Campaign.CampaignDisplayChanged -= StateDirty;
     }
 
     private void OnPermsChanged(AdminPermsChangedEventArgs args)

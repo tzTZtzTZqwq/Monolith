@@ -1,3 +1,4 @@
+using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared.Eui;
 using Robust.Shared.Serialization;
 
@@ -14,7 +15,9 @@ public sealed class NsvSectorMonitorEuiState : EuiStateBase
         int activeSectorSoftCapacity,
         NsvSectorMonitorNode[] nodes,
         NsvSectorMonitorFleet[] fleets,
-        string starmapId)
+        string starmapId,
+        NsvSectorMonitorCampaign? campaign,
+        string? statusMessage)
     {
         Rows = rows;
         TotalSectorCount = totalSectorCount;
@@ -24,6 +27,8 @@ public sealed class NsvSectorMonitorEuiState : EuiStateBase
         Nodes = nodes;
         Fleets = fleets;
         StarmapId = starmapId;
+        Campaign = campaign;
+        StatusMessage = statusMessage;
     }
 
     public NsvSectorMonitorRow[] Rows { get; }
@@ -34,6 +39,12 @@ public sealed class NsvSectorMonitorEuiState : EuiStateBase
     public NsvSectorMonitorNode[] Nodes { get; }
     public NsvSectorMonitorFleet[] Fleets { get; }
     public string StarmapId { get; }
+
+    // Null when no campaign rule is running.
+    public NsvSectorMonitorCampaign? Campaign { get; }
+
+    // Result of the last admin action, shown in the panel header.
+    public string? StatusMessage { get; }
 }
 
 [Serializable, NetSerializable]
@@ -148,6 +159,49 @@ public static class NsvSectorMonitorEuiMsg
     }
 
     [Serializable, NetSerializable]
+    public sealed class AdjustScoreRequest : EuiMessageBase
+    {
+        public AdjustScoreRequest(int amount, bool absolute)
+        {
+            Amount = amount;
+            Absolute = absolute;
+        }
+
+        // Added to the score, or the new score when Absolute.
+        public int Amount { get; }
+        public bool Absolute { get; }
+    }
+
+    [Serializable, NetSerializable]
+    public sealed class AdjustThreatRequest : EuiMessageBase
+    {
+        public AdjustThreatRequest(float amount, bool absolute)
+        {
+            Amount = amount;
+            Absolute = absolute;
+        }
+
+        // Added to the threat, or the new threat when Absolute.
+        public float Amount { get; }
+        public bool Absolute { get; }
+    }
+
+    [Serializable, NetSerializable]
+    public sealed class AnnounceBriefingRequest : EuiMessageBase
+    {
+    }
+
+    [Serializable, NetSerializable]
+    public sealed class SendReminderRequest : EuiMessageBase
+    {
+    }
+
+    [Serializable, NetSerializable]
+    public sealed class DispatchBlockadeRequest : EuiMessageBase
+    {
+    }
+
+    [Serializable, NetSerializable]
     public sealed class SpawnDataFleetRequest : EuiMessageBase
     {
         public SpawnDataFleetRequest(string starmapId, string nodeId, string faction)
@@ -176,4 +230,38 @@ public static class NsvSectorMonitorEuiMsg
         public string StarmapId { get; }
         public string NodeId { get; }
     }
+}
+
+/// <summary>
+/// The running campaign as the admin panel shows it: the player-facing summary plus pacing state.
+/// Times are seconds at the moment the state was built.
+/// </summary>
+[Serializable, NetSerializable]
+public sealed class NsvSectorMonitorCampaign
+{
+    public NsvSectorMonitorCampaign(
+        NsvCampaignSummaryState summary,
+        string outcome,
+        bool briefingDelivered,
+        int reminderStage,
+        int? nextReminderSeconds,
+        int? extensionSeconds,
+        int activeSeconds)
+    {
+        Summary = summary;
+        Outcome = outcome;
+        BriefingDelivered = briefingDelivered;
+        ReminderStage = reminderStage;
+        NextReminderSeconds = nextReminderSeconds;
+        ExtensionSeconds = extensionSeconds;
+        ActiveSeconds = activeSeconds;
+    }
+
+    public NsvCampaignSummaryState Summary { get; }
+    public string Outcome { get; }
+    public bool BriefingDelivered { get; }
+    public int ReminderStage { get; }
+    public int? NextReminderSeconds { get; }
+    public int? ExtensionSeconds { get; }
+    public int ActiveSeconds { get; }
 }

@@ -15,6 +15,9 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
     public event Action<string, string>? OnSpawnFleet;
     // shipId, nodeId
     public event Action<string, string>? OnMoveFleet;
+    // amount, absolute (set to amount instead of adding it)
+    public event Action<int, bool>? OnAdjustScore;
+    public event Action<float, bool>? OnAdjustThreat;
 
     // OptionButton item id -> faction id sent to the server.
     private static readonly string[] SpawnFactions = { "NSVHostile", "NSVFederal" };
@@ -28,6 +31,24 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
     {
         RobustXamlLoader.Load(this);
         SetRows(Array.Empty<NsvSectorMonitorRow>());
+
+        Tabs.SetTabTitle(0, Loc.GetString("nsv-sector-monitor-tab-campaign"));
+        Tabs.SetTabTitle(1, Loc.GetString("nsv-sector-monitor-tab-sectors"));
+        Tabs.SetTabTitle(2, Loc.GetString("nsv-sector-monitor-tab-starmap"));
+        SetCampaign(null);
+
+        ScoreMinus5.OnPressed += _ => OnAdjustScore?.Invoke(-5, false);
+        ScoreMinus1.OnPressed += _ => OnAdjustScore?.Invoke(-1, false);
+        ScorePlus1.OnPressed += _ => OnAdjustScore?.Invoke(1, false);
+        ScorePlus5.OnPressed += _ => OnAdjustScore?.Invoke(5, false);
+        ScoreSetButton.OnPressed += _ => SubmitScore();
+        ScoreInput.OnTextEntered += _ => SubmitScore();
+        ThreatMinus5.OnPressed += _ => OnAdjustThreat?.Invoke(-5f, false);
+        ThreatMinus1.OnPressed += _ => OnAdjustThreat?.Invoke(-1f, false);
+        ThreatPlus1.OnPressed += _ => OnAdjustThreat?.Invoke(1f, false);
+        ThreatPlus5.OnPressed += _ => OnAdjustThreat?.Invoke(5f, false);
+        ThreatSetButton.OnPressed += _ => SubmitThreat();
+        ThreatInput.OnTextEntered += _ => SubmitThreat();
 
         FactionButton.AddItem(Loc.GetString("nsv-sector-monitor-spawn-faction-hostile"), 0);
         FactionButton.AddItem(Loc.GetString("nsv-sector-monitor-spawn-faction-federal"), 1);
@@ -62,6 +83,8 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
             state.ActiveSectorCount,
             state.ActiveSectorSoftCapacity);
         SetRows(state.Rows);
+        SetCampaign(state.Campaign);
+        StatusLabel.Text = state.StatusMessage ?? string.Empty;
 
         _nodes = state.Nodes;
         _starmapId = state.StarmapId;
@@ -71,6 +94,66 @@ public sealed partial class NsvSectorMonitorWindow : DefaultWindow
         SetFleets(state.Fleets);
         RefreshSelectedNode();
         UpdateMoveState();
+    }
+
+    private void SetCampaign(NsvSectorMonitorCampaign? campaign)
+    {
+        NoCampaignLabel.Visible = campaign == null;
+        CampaignContent.Visible = campaign != null;
+        foreach (var button in new[] { BriefingButton, ReminderButton, BlockadeButton, StartVoteButton })
+            button.Disabled = campaign == null;
+
+        ObjectivesContainer.RemoveAllChildren();
+        if (campaign == null)
+            return;
+
+        var summary = campaign.Summary;
+        PhaseValue.Text = Loc.GetString(summary.PhaseLoc);
+        OutcomeValue.Text = campaign.Outcome;
+        ScoreValue.Text = summary.Score.ToString();
+        ThreatValue.Text = summary.ThreatElevation.ToString();
+        ActiveTimeValue.Text = FormatSeconds(campaign.ActiveSeconds);
+        BriefingValue.Text = Loc.GetString(campaign.BriefingDelivered
+            ? "nsv-sector-monitor-campaign-briefing-sent"
+            : "nsv-sector-monitor-campaign-briefing-pending");
+        ReminderStageValue.Text = Loc.GetString("nsv-sector-monitor-campaign-reminder-stage-value",
+            ("stage", campaign.ReminderStage));
+        NextReminderValue.Text = campaign.NextReminderSeconds is { } next
+            ? FormatSeconds(next)
+            : Loc.GetString("nsv-sector-monitor-campaign-reminder-paused");
+        ExtensionValue.Text = campaign.ExtensionSeconds is { } extension ? FormatSeconds(extension) : "-";
+
+        foreach (var objective in summary.Objectives)
+        {
+            ObjectivesContainer.AddChild(new Label
+            {
+                Text = Loc.GetString("nsv-sector-monitor-campaign-objective",
+                    ("label", Loc.GetString(objective.LabelLoc)),
+                    ("status", Loc.GetString(objective.StatusLoc)),
+                    ("tally", objective.Tally),
+                    ("target", objective.Target)),
+            });
+        }
+    }
+
+    private void SubmitScore()
+    {
+        if (int.TryParse(ScoreInput.Text, out var score))
+            OnAdjustScore?.Invoke(score, true);
+    }
+
+    private void SubmitThreat()
+    {
+        if (float.TryParse(ThreatInput.Text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var threat))
+        {
+            OnAdjustThreat?.Invoke(threat, true);
+        }
+    }
+
+    private static string FormatSeconds(int seconds)
+    {
+        return TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"mm\:ss");
     }
 
     private void SetFleets(NsvSectorMonitorFleet[] fleets)

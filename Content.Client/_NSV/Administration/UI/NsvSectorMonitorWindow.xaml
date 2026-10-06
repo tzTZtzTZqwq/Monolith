@@ -1,79 +1,164 @@
 <DefaultWindow xmlns="https://spacestation14.io"
                xmlns:ui="clr-namespace:Content.Client._NSV.Administration.UI"
                Title="{Loc nsv-sector-monitor-title}"
-               SetSize="1740 760">
+               SetSize="1320 780"
+               MinSize="960 560">
     <BoxContainer Orientation="Vertical" Margin="8">
-        <BoxContainer Orientation="Horizontal" Margin="0 0 0 4">
-            <Label Name="TotalSectorCapacity"
+        <!-- Header: capacity, last action result, refresh -->
+        <BoxContainer Orientation="Horizontal" Margin="0 0 0 2">
+            <Label Name="TotalSectorCapacity" Access="Public" Margin="0 0 16 0" />
+            <Label Name="ActiveSectorCapacity" Access="Public" />
+            <Control HorizontalExpand="True" />
+            <Label Name="StatusLabel"
                    Access="Public"
-                   Margin="0 0 16 0" />
-            <Label Name="ActiveSectorCapacity"
-                   Access="Public" />
+                   StyleClasses="LabelSubText"
+                   Margin="0 0 12 0" />
+            <Button Name="RefreshButton" Access="Public" Text="{Loc nsv-sector-monitor-refresh}" />
         </BoxContainer>
         <Label Text="{Loc nsv-sector-monitor-capacity-note}"
                StyleClasses="LabelSubText"
-               Margin="0 0 0 8" />
-        <Button Name="RefreshButton"
-                Access="Public"
-                Text="{Loc nsv-sector-monitor-refresh}"
-                HorizontalAlignment="Right"
-                Margin="0 0 0 8" />
-        <Button Name="StartVoteButton"
-                Access="Public"
-                Text="{Loc nsv-sector-monitor-start-vote}"
-                HorizontalAlignment="Right"
-                Margin="0 0 0 8" />
-        <ScrollContainer MinHeight="180" HorizontalExpand="True">
-            <GridContainer Name="Rows"
+               Margin="0 0 0 6" />
+
+        <TabContainer Name="Tabs" VerticalExpand="True" HorizontalExpand="True">
+            <!-- Tab 0: campaign -->
+            <ScrollContainer HScrollEnabled="False">
+                <BoxContainer Orientation="Vertical" Margin="8">
+                    <Label Name="NoCampaignLabel"
+                           Text="{Loc nsv-sector-monitor-campaign-none}"
+                           StyleClasses="LabelSubText" />
+                    <BoxContainer Name="CampaignContent" Orientation="Horizontal" HorizontalExpand="True">
+                        <BoxContainer Orientation="Vertical" MinWidth="420">
+                            <Label Text="{Loc nsv-sector-monitor-campaign-status}" StyleClasses="LabelHeading" />
+                            <GridContainer Columns="2" HorizontalExpand="True" Margin="0 4 0 8">
+                                <Label Text="{Loc nsv-sector-monitor-campaign-phase}" MinWidth="170" />
+                                <Label Name="PhaseValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-outcome}" />
+                                <Label Name="OutcomeValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-score}" />
+                                <Label Name="ScoreValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-threat}" />
+                                <Label Name="ThreatValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-active-time}" />
+                                <Label Name="ActiveTimeValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-briefing}" />
+                                <Label Name="BriefingValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-reminder-stage}" />
+                                <Label Name="ReminderStageValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-next-reminder}" />
+                                <Label Name="NextReminderValue" />
+                                <Label Text="{Loc nsv-sector-monitor-campaign-extension}" />
+                                <Label Name="ExtensionValue" />
+                            </GridContainer>
+                            <Label Text="{Loc nsv-sector-monitor-campaign-objectives}" StyleClasses="LabelHeading" />
+                            <BoxContainer Name="ObjectivesContainer" Orientation="Vertical" Margin="0 4 0 0" />
+                        </BoxContainer>
+
+                        <BoxContainer Orientation="Vertical" HorizontalExpand="True" Margin="24 0 0 0">
+                            <Label Text="{Loc nsv-sector-monitor-campaign-score-adjust}" StyleClasses="LabelHeading" />
+                            <BoxContainer Orientation="Horizontal" Margin="0 4 0 12">
+                                <Button Name="ScoreMinus5" Text="-5" MinWidth="44" />
+                                <Button Name="ScoreMinus1" Text="-1" MinWidth="44" />
+                                <Button Name="ScorePlus1" Text="+1" MinWidth="44" />
+                                <Button Name="ScorePlus5" Text="+5" MinWidth="44" Margin="0 0 12 0" />
+                                <LineEdit Name="ScoreInput"
+                                          MinWidth="90"
+                                          PlaceHolder="{Loc nsv-sector-monitor-campaign-value}" />
+                                <Button Name="ScoreSetButton" Text="{Loc nsv-sector-monitor-campaign-set}" />
+                            </BoxContainer>
+
+                            <Label Text="{Loc nsv-sector-monitor-campaign-threat-adjust}" StyleClasses="LabelHeading" />
+                            <BoxContainer Orientation="Horizontal" Margin="0 4 0 12">
+                                <Button Name="ThreatMinus5" Text="-5" MinWidth="44" />
+                                <Button Name="ThreatMinus1" Text="-1" MinWidth="44" />
+                                <Button Name="ThreatPlus1" Text="+1" MinWidth="44" />
+                                <Button Name="ThreatPlus5" Text="+5" MinWidth="44" Margin="0 0 12 0" />
+                                <LineEdit Name="ThreatInput"
+                                          MinWidth="90"
+                                          PlaceHolder="{Loc nsv-sector-monitor-campaign-value}" />
+                                <Button Name="ThreatSetButton" Text="{Loc nsv-sector-monitor-campaign-set}" />
+                            </BoxContainer>
+
+                            <Label Text="{Loc nsv-sector-monitor-campaign-broadcasts}" StyleClasses="LabelHeading" />
+                            <Label Text="{Loc nsv-sector-monitor-campaign-broadcasts-note}"
+                                   StyleClasses="LabelSubText"
+                                   Margin="0 2 0 4" />
+                            <GridContainer Columns="2" HorizontalExpand="True">
+                                <Button Name="BriefingButton"
+                                        Access="Public"
+                                        Text="{Loc nsv-sector-monitor-campaign-send-briefing}"
+                                        HorizontalExpand="True" />
+                                <Button Name="ReminderButton"
+                                        Access="Public"
+                                        Text="{Loc nsv-sector-monitor-campaign-send-reminder}"
+                                        HorizontalExpand="True" />
+                                <Button Name="BlockadeButton"
+                                        Access="Public"
+                                        Text="{Loc nsv-sector-monitor-campaign-send-blockade}"
+                                        HorizontalExpand="True" />
+                                <Button Name="StartVoteButton"
+                                        Access="Public"
+                                        Text="{Loc nsv-sector-monitor-start-vote}"
+                                        HorizontalExpand="True" />
+                            </GridContainer>
+                        </BoxContainer>
+                    </BoxContainer>
+                </BoxContainer>
+            </ScrollContainer>
+
+            <!-- Tab 1: sector instances -->
+            <ScrollContainer HorizontalExpand="True" VerticalExpand="True">
+                <GridContainer Name="Rows"
+                               Access="Public"
+                               Columns="9"
+                               HorizontalExpand="True"
+                               Margin="4" />
+            </ScrollContainer>
+
+            <!-- Tab 2: strategic starmap and data fleets -->
+            <BoxContainer Orientation="Horizontal" VerticalExpand="True" HorizontalExpand="True" Margin="4">
+                <PanelContainer HorizontalExpand="True" VerticalExpand="True" SizeFlagsStretchRatio="2">
+                    <ui:NsvStarmapControl Name="Starmap" Access="Public" />
+                </PanelContainer>
+                <BoxContainer Orientation="Vertical"
+                              HorizontalExpand="True"
+                              MinWidth="440"
+                              Margin="8 0 0 0">
+                    <Label Name="SelectedNodeLabel"
                            Access="Public"
-                           Columns="9"
-                           HorizontalExpand="True" />
-        </ScrollContainer>
-        <Label Text="{Loc nsv-sector-monitor-starmap-title}"
-               StyleClasses="LabelHeading"
-               Margin="0 8 0 4" />
-        <BoxContainer Orientation="Horizontal" VerticalExpand="True" HorizontalExpand="True">
-            <PanelContainer HorizontalExpand="True" VerticalExpand="True" SizeFlagsStretchRatio="2">
-                <ui:NsvStarmapControl Name="Starmap" Access="Public" />
-            </PanelContainer>
-            <BoxContainer Orientation="Vertical"
-                          MinWidth="960"
-                          Margin="8 0 0 0">
-                <Label Name="SelectedNodeLabel"
-                       Access="Public"
-                       Text="{Loc nsv-sector-monitor-node-none}" />
-                <Label Text="{Loc nsv-sector-monitor-node-residents}"
-                       StyleClasses="LabelSubText"
-                       Margin="0 4 0 0" />
-                <ItemList Name="ResidentList"
-                          Access="Public"
-                          MinHeight="90"
-                          SelectMode="None" />
-                <OptionButton Name="FactionButton"
+                           StyleClasses="LabelHeading"
+                           Text="{Loc nsv-sector-monitor-node-none}" />
+                    <Label Text="{Loc nsv-sector-monitor-node-residents}"
+                           StyleClasses="LabelSubText"
+                           Margin="0 4 0 0" />
+                    <ItemList Name="ResidentList"
                               Access="Public"
-                              Margin="0 4 0 0" />
-                <Button Name="SpawnFleetButton"
-                        Access="Public"
-                        Text="{Loc nsv-sector-monitor-spawn-fleet}"
-                        Disabled="True"
-                        Margin="0 4 0 8" />
-                <Label Text="{Loc nsv-sector-monitor-fleets}"
-                       StyleClasses="LabelSubText" />
-                <ItemList Name="FleetList"
-                          Access="Public"
-                          VerticalExpand="True"
-                          MinHeight="160" />
-                <Label Name="MoveTargetLabel"
-                       Access="Public"
-                       Text="{Loc nsv-sector-monitor-move-target-none}"
-                       StyleClasses="LabelSubText"
-                       Margin="0 4 0 0" />
-                <Button Name="MoveFleetButton"
-                        Access="Public"
-                        Text="{Loc nsv-sector-monitor-move-fleet}"
-                        Disabled="True"
-                        Margin="0 4 0 0" />
+                              MinHeight="90"
+                              SelectMode="None" />
+                    <BoxContainer Orientation="Horizontal" Margin="0 4 0 8">
+                        <OptionButton Name="FactionButton" Access="Public" MinWidth="120" />
+                        <Button Name="SpawnFleetButton"
+                                Access="Public"
+                                Text="{Loc nsv-sector-monitor-spawn-fleet}"
+                                HorizontalExpand="True"
+                                Disabled="True" />
+                    </BoxContainer>
+                    <Label Text="{Loc nsv-sector-monitor-fleets}" StyleClasses="LabelSubText" />
+                    <ItemList Name="FleetList"
+                              Access="Public"
+                              VerticalExpand="True"
+                              MinHeight="160" />
+                    <Label Name="MoveTargetLabel"
+                           Access="Public"
+                           Text="{Loc nsv-sector-monitor-move-target-none}"
+                           StyleClasses="LabelSubText"
+                           Margin="0 4 0 0" />
+                    <Button Name="MoveFleetButton"
+                            Access="Public"
+                            Text="{Loc nsv-sector-monitor-move-fleet}"
+                            Disabled="True"
+                            Margin="0 4 0 0" />
+                </BoxContainer>
             </BoxContainer>
-        </BoxContainer>
+        </TabContainer>
     </BoxContainer>
 </DefaultWindow>

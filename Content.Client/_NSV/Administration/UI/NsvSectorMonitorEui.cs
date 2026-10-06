@@ -17,6 +17,11 @@ public sealed class NsvSectorMonitorEui : BaseEui
         _window.OnClose += () => SendMessage(new CloseEuiMessage());
         _window.RefreshButton.OnPressed += _ => RequestRefresh();
         _window.StartVoteButton.OnPressed += _ => SendMessage(new StartOutcomeVoteRequest());
+        _window.BriefingButton.OnPressed += _ => SendMessage(new AnnounceBriefingRequest());
+        _window.ReminderButton.OnPressed += _ => SendMessage(new SendReminderRequest());
+        _window.BlockadeButton.OnPressed += _ => SendMessage(new DispatchBlockadeRequest());
+        _window.OnAdjustScore += (amount, absolute) => SendMessage(new AdjustScoreRequest(amount, absolute));
+        _window.OnAdjustThreat += (amount, absolute) => SendMessage(new AdjustThreatRequest(amount, absolute));
         _window.OnSpawnFleet += (nodeId, faction) =>
             SendMessage(new SpawnDataFleetRequest(_window.StarmapId, nodeId, faction));
         _window.OnMoveFleet += (shipId, nodeId) =>

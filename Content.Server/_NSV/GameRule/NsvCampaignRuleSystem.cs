@@ -118,6 +118,11 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
         if (component.BriefingDelivered || delay < 0f || component.ActiveTime < delay)
             return;
 
+        DeliverBriefing(component);
+    }
+
+    private void DeliverBriefing(NsvCampaignRuleComponent component)
+    {
         component.BriefingDelivered = true;
 
         var lines = new List<string> { Loc.GetString("nsv-campaign-briefing-intro") };
