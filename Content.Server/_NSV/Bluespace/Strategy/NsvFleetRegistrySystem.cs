@@ -666,9 +666,11 @@ public sealed partial class NsvFleetRegistrySystem : EntitySystem
     /// Abstract-combat power for a parked (Available) ship: its photographed full-complement turret
     /// count (<see cref="NsvFleetShip.FullComplementTurretCount"/>, taken at spawn while the guns were
     /// still anchored) scaled by its data-state completeness (<see cref="NsvFleetShip.DataTargetFloorCount"/>
-    /// over full complement). The frozen grid's live turrets can't be counted — anchored guns detach
-    /// across the holding-map move — so the photograph is the only turret authority here; abstract
-    /// damage lowers the data number, which is what makes a battered data ship fight weaker.
+    /// over full complement). The turrets do stay anchored on the parked grid (verified by
+    /// <c>ParkedShipKeepsCoreTurretsAndThrusters</c>), but the photograph is the turret authority in
+    /// the data state, mirroring how floors use <see cref="NsvFleetShip.DataTargetFloorCount"/> rather
+    /// than the frozen grid; abstract damage lowers the data number, which is what makes a battered
+    /// data ship fight weaker.
     /// <see cref="GetCombatPower"/> counts a Live grid's turrets directly. Zero for non-Available or
     /// unphotographed ships (a turretless ship reads zero and simply cannot attack).
     /// </summary>

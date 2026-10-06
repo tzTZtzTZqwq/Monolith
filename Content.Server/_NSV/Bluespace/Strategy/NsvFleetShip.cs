@@ -61,11 +61,11 @@ public sealed class NsvFleetShip
     public IReadOnlyDictionary<Vector2i, Tile> FullComplementFloors = new Dictionary<Vector2i, Tile>();
 
     /// <summary>
-    /// Turret count photographed at spawn, while the grid is Live and its guns are anchored.
-    /// Abstract combat power reads this scaled by completeness, because a grid parked on the
-    /// holding map loses its live turret associations (anchored guns detach across the map move),
-    /// so counting turrets on the frozen grid would always read zero. The live-grid
-    /// <see cref="NsvFleetRegistrySystem.GetCombatPower"/> still counts turrets directly.
+    /// Turret count photographed at spawn. Abstract combat power reads this scaled by completeness,
+    /// so the data state has one turret authority alongside its floor numbers. (An earlier note here
+    /// claimed parked guns detach from the grid; they don't — the zero count came from a query that
+    /// skipped paused entities.) The live-grid <see cref="NsvFleetRegistrySystem.GetCombatPower"/>
+    /// still counts turrets directly.
     /// </summary>
     public int FullComplementTurretCount;
 

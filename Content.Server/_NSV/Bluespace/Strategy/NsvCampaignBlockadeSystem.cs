@@ -16,8 +16,9 @@ namespace Content.Server._NSV.Bluespace.Strategy;
 /// The last stalled-objective reminder's consequence (NSV13 ROUND-006): a hostile blockade fleet
 /// arrives in the crew's current sector. Each ship's AI core is an FTL interdictor, so the crew can't
 /// simply jump away — they have to fight through it. Grids load straight into the live sector (as the
-/// sector ship generator does) rather than via park → instantiate, so cores stay anchored to their
-/// ships. They are registered resident at the node, so they sleep and wake with it like any fleet.
+/// sector ship generator does): the crew's sector is already awake, so there's no need to round-trip
+/// through the holding map. They are registered resident at the node, so they sleep and wake with it
+/// like any fleet.
 /// </summary>
 public sealed partial class NsvCampaignBlockadeSystem : EntitySystem
 {

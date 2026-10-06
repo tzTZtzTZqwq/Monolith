@@ -1,12 +1,15 @@
+using System.Linq;
 using System.Numerics;
 using Content.Server._Mono.FireControl;
 using Content.Server._NSV.Bluespace.Encounters;
 using Content.Server._NSV.Bluespace.Strategy;
 using Content.Server.Shuttles.Components;
 using Content.Server.Shuttles.Systems;
+using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared.Mind;
 using Content.Shared.Mind.Components;
 using Robust.Server.GameObjects;
+using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -748,6 +751,77 @@ public sealed class NsvFleetRegistrySystemTest
         });
 
         await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    /// Parking a real data ship and bringing it back keeps its working parts: the AI core, turret and
+    /// thrusters stay anchored on the grid through scratch → holding map → live map, and unpause on
+    /// arrival. Guards against woken background fleets coming back as inert hulks. (An old note
+    /// claimed anchored guns detach on parking; this proves they don't.)
+    /// </summary>
+    [Test]
+    public async Task ParkedShipKeepsCoreTurretsAndThrusters()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings { Dirty = true });
+        var server = pair.Server;
+        var destination = await pair.CreateTestMap();
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var fleets = entityManager.System<NsvFleetRegistrySystem>();
+        var mapSystem = entityManager.System<MapSystem>();
+        var loader = entityManager.System<MapLoaderSystem>();
+        var gridPath = new ResPath("/SharedMaps/_NSV/Bluespace/gust_2.yml");
+
+        await server.WaitAssertion(() =>
+        {
+            // Same sequence as the strategy spawner: paused scratch map -> register -> park.
+            mapSystem.CreateMap(out var scratch);
+            mapSystem.SetPaused(scratch, true);
+            Assert.That(loader.TryLoadGrid(scratch, gridPath, out var grid), Is.True);
+            var gridUid = grid!.Value.Owner;
+            var ship = fleets.RegisterShip(gridUid, gridPath);
+            var parts = CountAnchoredParts(entityManager, gridUid);
+            Assert.That(parts.Cores, Is.EqualTo(1));
+            Assert.That(parts.Turrets, Is.GreaterThan(0));
+            Assert.That(parts.Thrusters, Is.GreaterThan(0));
+
+            Assert.That(fleets.TrySerializeShip(ship.Id, out var parkFailure), Is.True, parkFailure);
+            mapSystem.DeleteMap(scratch);
+            Assert.That(CountAnchoredParts(entityManager, gridUid), Is.EqualTo(parts), "parked ship keeps its parts");
+
+            var arrival = new EntityCoordinates(destination.MapUid, new Vector2(200f, 200f));
+            Assert.That(fleets.TryInstantiateShip(ship.Id, arrival, out var wakeFailure), Is.True, wakeFailure);
+            Assert.That(CountAnchoredParts(entityManager, gridUid), Is.EqualTo(parts), "woken ship keeps its parts");
+
+            var cores = entityManager.AllEntityQueryEnumerator<NsvBluespaceShipAiCoreComponent, TransformComponent>();
+            while (cores.MoveNext(out var core, out _, out var xform))
+            {
+                if (xform.GridUid == gridUid)
+                {
+                    Assert.That(entityManager.GetComponent<MetaDataComponent>(core).EntityPaused, Is.False,
+                        "parts unpause with the grid on arrival");
+                }
+            }
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    private static (int Cores, int Turrets, int Thrusters) CountAnchoredParts(IEntityManager entityManager, EntityUid gridUid)
+    {
+        int Count<T>() where T : IComponent
+        {
+            var count = 0;
+            var query = entityManager.AllEntityQueryEnumerator<T, TransformComponent>();
+            while (query.MoveNext(out _, out _, out var xform))
+            {
+                if (xform.GridUid == gridUid && xform.Anchored)
+                    count++;
+            }
+
+            return count;
+        }
+
+        return (Count<NsvBluespaceShipAiCoreComponent>(), Count<FireControllableComponent>(), Count<ThrusterComponent>());
     }
 
     /// <summary>

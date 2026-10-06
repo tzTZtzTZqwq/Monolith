@@ -175,7 +175,7 @@
 - **ref：** STARSYS-008（180s 抽象结算节奏）/ STARSYS-010（阵营计时生成）、FLEET-001/005（编成与规模 = 难度+威胁）/ FLEET-009（AI-vs-AI 骰子结算）。
 - **S7 剩余缺口（地基之上的下一增量）：**
   1. ✅ **faction-on-wake（2026-09-24 已完成，见上方状态块）：** 数据舰唤醒后已正确带 NSVHostile 阵营并与玩家交火；安全阀确保 sector-parked 玩家/encounter 舰不被误 faction。
-  2. ✅ **`NsvAbstractCombatSystem`（2026-09-25 已完成）：** CVar `nsv.bluespace.strategy.combat_interval` 驱动，按节点分组 Available 数据舰，门禁 `CanResolveAbstractCombat` 且已物化节点须 Sleeping；power 加权骰子，负方掉层、归零 `TryDestroyDataShip`；阵营敌对读原型 `Relations`。顺带修复 parked grid 上炮塔脱锚导致战力恒 0（`FullComplementTurretCount` 在注册时拍照）。AI-vs-AI 死亡不计分（`DataStateDeathDoesNotScore`）。测试 `NsvAbstractCombatSystemTest`。
+  2. ✅ **`NsvAbstractCombatSystem`（2026-09-25 已完成）：** CVar `nsv.bluespace.strategy.combat_interval` 驱动，按节点分组 Available 数据舰，门禁 `CanResolveAbstractCombat` 且已物化节点须 Sleeping；power 加权骰子，负方掉层、归零 `TryDestroyDataShip`；阵营敌对读原型 `Relations`。顺带让炮塔数在注册时拍照（`FullComplementTurretCount`）。注：当时以为停放后炮塔会脱锚，2026-10-06 实测证伪——炮塔、核心、推进器都留在船上；数到 0 的真正原因是查询跳过了暂停实体，已于 `d8ee4b5579` 修复。AI-vs-AI 死亡不计分（`DataStateDeathDoesNotScore`）。测试 `NsvAbstractCombatSystemTest`。
   3. 🟡 **编成：** spawner 已同时播种 NSVFederal 驻军 + NSVHostile（双阵营）；**destroyers/battleships/supply 配比 YAML 未做**，仍是单一舰型 `gust_2`。
 
 ## 5. 延后步骤（S1–S7 收束后再做，先占位不展开）

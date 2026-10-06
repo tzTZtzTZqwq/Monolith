@@ -88,7 +88,7 @@
 > - **催促：** `nsv.campaign.reminder_interval`（默认 900s，≤0 关闭）内没有目标进展就发下一级提醒：第 1 级只警告；第 2–4 级每次扣 `reminder_score_penalty`（默认 1）分，最低到 0；第 5 级广播 `NsvCampaignBlockadeEvent`，由 `NsvCampaignBlockadeSystem` 往船员当前星区派封锁舰队（`blockade_size` 艘，默认 2；距船员 `blockade_distance` 米，默认 400），每艘的 AI 核心都是 FTL 拦截器（见 N7）。船员不在任何蓝空星区时改为加威胁（`blockade_fallback_threat`，默认 5）。之后从第 1 级循环。
 > - **算作进展的事：** 跳跃计入目标、完成遭遇。两者都会把停滞计时和提醒级别清零。
 > - **只在胜负未定时运行：** 投票开始（Outcome 已定）或进入延长阶段后不再催促。
-> - **封锁舰的生成方式：** 直接把 gust_2 加载进船员所在的活星区（与星区舰船生成器相同），**不走**「停放 → 物化」，因为停放到暂存地图时锚定实体会脱离网格，核心可能不随船回来。舰船登记为该节点驻留舰，随星区休眠、唤醒。
+> - **封锁舰的生成方式：** 直接把 gust_2 加载进船员所在的活星区（与星区舰船生成器相同）。船员所在星区本来就醒着，不必绕道暂存地图（早先担心停放会让锚定实体脱离网格，已实测证伪）。舰船登记为该节点驻留舰，随星区休眠、唤醒。
 > - **测试：** `NsvCampaignRuleTest.BriefingAnnouncedAfterDelay`、`StalledObjectivesEscalateAndProgressResets`，`NsvFtlInterdictionTest.BlockadeArrivesAtCrewSectorAndInterdicts`。
 - **参考：** 01 ROUND-005/006，06 MISSION-002/003（即 v2 计划中的 S9）。
 - **NSV13：** 开局约 3 分钟打印任务简报；之后每 15 分钟没有进展就升级警告，第 5 次直接在船员所在星系刷一支封锁舰队。
