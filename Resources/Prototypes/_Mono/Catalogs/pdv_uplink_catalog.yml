@@ -1675,7 +1675,7 @@
   description: uplink-pdv-t1-voucher-desc
   productEntity: ShipVoucherPdvT1
   cost:
-    Doubloon: 150
+    Doubloon: 60 # +10 tax from mat cost since no research cost
   categories:
   - UplinkPdvVouchers
   conditions:
@@ -1690,7 +1690,7 @@
   description: uplink-pdv-t2-voucher-desc
   productEntity: ShipVoucherPdvT2
   cost:
-    Doubloon: 275
+    Doubloon: 175 # +25 tax from mat cost since no research cost
   categories:
   - UplinkPdvVouchers
   conditions:
@@ -1705,7 +1705,7 @@
   description: uplink-pdv-t3-voucher-desc
   productEntity: ShipVoucherPdvT3
   cost:
-    Doubloon: 600
+    Doubloon: 650 # +50 tax from mat cost since no research cost
   categories:
   - UplinkPdvVouchers
   conditions:
@@ -1720,7 +1720,7 @@
   description: uplink-pdv-t4-saturn-voucher-desc
   productEntity: ShipVoucherSaturn
   cost:
-    Doubloon: 1150
+    Doubloon: 1250 # +100 tax from mat cost since no research cost
   categories:
   - UplinkPdvVouchers
   conditions:
@@ -1728,7 +1728,7 @@
     whitelist:
       tags:
       - FactionStaticUplinkPdv
-      
+
 - type: listing
   id: UplinkHardBombPDV
   name:  uplink-HardBomb-PDV-name
