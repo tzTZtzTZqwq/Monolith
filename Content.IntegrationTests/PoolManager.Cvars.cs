@@ -1,4 +1,5 @@
 #nullable enable
+using Content.Shared._NSV.CCVar;
 using Content.Shared.CCVar;
 
 namespace Content.IntegrationTests;
@@ -36,6 +37,7 @@ public static partial class PoolManager
         (CCVars.MovementMobPushing.Name, "false"),
         (CCVars.GameLobbyDefaultPreset.Name, "secret"), // Frontier: Adventure takes ages, default to secret
         (CCVars.StaticStorageUI.Name, "true"),// Frontier: causes storage test failures
-        (CCVars.StorageLimit.Name, "1")// Frontier: test failures with multiple storage 
+        (CCVars.StorageLimit.Name, "1"),// Frontier: test failures with multiple storage
+        (NsvCCVars.BluespaceDriveRequired.Name, "false") // NSV: test shuttles carry no jump core; drive tests opt in
     };
 }

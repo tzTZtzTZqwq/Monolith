@@ -22,6 +22,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
     [Dependency] private NsvBluespaceEncounterSystem _encounters = default!;
     [Dependency] private NsvBluespaceFactionSystem _factions = default!;
     [Dependency] private NsvFtlInterdictionSystem _interdiction = default!;
+    [Dependency] private NsvBluespaceDriveSystem _drives = default!;
     [Dependency] private NsvBluespaceSectorSystem _sectors = default!;
     [Dependency] private ShuttleSystem _shuttle = default!;
 
@@ -127,6 +128,11 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
                 : new NsvBluespaceFactionSnapshot(false, default);
         }
 
+        // Checked before the destination sector is created, so a drive that isn't ready costs nothing.
+        var fuelCost = starmap.TryGetNode(destinationNodeId, out var destinationNode) ? destinationNode.FuelCost : 0;
+        if (!_drives.CanJump(shuttleUid, fuelCost, out reason))
+            return false;
+
         if (!_sectors.TryGetOrCreateNode(
                 starmapId,
                 destinationNodeId,
@@ -141,7 +147,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
             return false;
         }
 
-        return TryStartArrival(shuttleUid, shuttle, destinationMap, destinationSector, returnCoordinates, factionSnapshot, out reason);
+        return TryStartArrival(shuttleUid, shuttle, destinationMap, destinationSector, returnCoordinates, factionSnapshot, fuelCost, out reason);
     }
 
     public bool TryReturnToDeparture(EntityUid shuttleUid, out string? reason)
@@ -185,6 +191,10 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         if (!_shuttle.CanFTL(shuttleUid, out reason))
             return false;
 
+        // Template sectors aren't starmap nodes and carry no fuel cost, but still need a charged drive.
+        if (!_drives.CanJump(shuttleUid, 0, out reason))
+            return false;
+
         if (!_sectors.TryGetOrCreate(
                 templateId,
                 seed,
@@ -210,7 +220,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         var factionSnapshot = TryComp<NsvBluespaceFactionComponent>(shuttleUid, out var faction)
             ? new NsvBluespaceFactionSnapshot(true, faction.Faction)
             : new NsvBluespaceFactionSnapshot(false, default);
-        return TryStartArrival(shuttleUid, shuttle, mapUid, sector, returnCoordinates, factionSnapshot, out reason);
+        return TryStartArrival(shuttleUid, shuttle, mapUid, sector, returnCoordinates, factionSnapshot, 0, out reason);
     }
 
     private bool TryStartArrival(
@@ -220,6 +230,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         NsvBluespaceSectorInstanceComponent destinationSector,
         EntityCoordinates returnCoordinates,
         NsvBluespaceFactionSnapshot factionSnapshot,
+        int fuelCost,
         out string? reason)
     {
         if (destinationSector.State != NsvBluespaceSectorState.Ready)
@@ -258,6 +269,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
             return false;
         }
 
+        _drives.ConsumeJump(shuttleUid, fuelCost);
         NotifySectorChanged(destinationMap);
         NotifyShuttleChanged(shuttleUid);
         reason = null;
@@ -281,6 +293,11 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
         if (!_shuttle.CanFTL(shuttleUid, out reason))
             return false;
 
+        // Returning home costs the same as jumping out of the current node.
+        var fuelCost = GetNodeFuelCost(sectorMap);
+        if (!_drives.CanJump(shuttleUid, fuelCost, out reason))
+            return false;
+
         _shuttle.FTLToCoordinates(shuttleUid, shuttle, returnCoordinates, Angle.Zero);
         if (!HasComp<FTLComponent>(shuttleUid))
         {
@@ -288,6 +305,7 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
             return false;
         }
 
+        _drives.ConsumeJump(shuttleUid, fuelCost);
         reason = null;
         return true;
     }
@@ -366,6 +384,19 @@ public sealed partial class NsvBluespaceSectorTravelSystem : EntitySystem
     /// Whether <paramref name="sector"/> is a Home node (the extraction point). Node-less template
     /// sectors (empty StarmapId/NodeId) resolve to false.
     /// </summary>
+    /// <summary>
+    /// The fuel cost of the starmap node <paramref name="sectorMap"/> instances, or 0 for a node-less
+    /// template sector.
+    /// </summary>
+    public int GetNodeFuelCost(EntityUid sectorMap)
+    {
+        return TryComp<NsvBluespaceSectorInstanceComponent>(sectorMap, out var sector) &&
+               _sectors.TryGetStarmap(sector.StarmapId, out var starmap) &&
+               starmap.TryGetNode(sector.NodeId, out var node)
+            ? node.FuelCost
+            : 0;
+    }
+
     private bool IsHomeNode(NsvBluespaceSectorInstanceComponent sector)
     {
         return _sectors.TryGetStarmap(sector.StarmapId, out var starmap) &&

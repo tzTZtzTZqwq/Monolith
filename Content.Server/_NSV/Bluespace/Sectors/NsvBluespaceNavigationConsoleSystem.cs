@@ -19,6 +19,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
     [Dependency] private NsvBluespaceSectorTravelSystem _travel = default!;
     [Dependency] private NsvCampaignRuleSystem _campaign = default!;
     [Dependency] private NsvFtlInterdictionSystem _interdiction = default!;
+    [Dependency] private NsvBluespaceDriveSystem _drives = default!;
     [Dependency] private SharedPopupSystem _popup = default!;
     [Dependency] private IPrototypeManager _prototypes = default!;
     [Dependency] private IRobustRandom _random = default!;
@@ -37,6 +38,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _lifecycle.SectorDisplayChanged += RefreshSector;
         _campaign.CampaignDisplayChanged += RefreshAllConsoles;
         _interdiction.InterdictionChanged += RefreshSector;
+        _drives.DriveDisplayChanged += RefreshShuttle;
     }
 
     public override void Shutdown()
@@ -47,6 +49,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         _lifecycle.SectorDisplayChanged -= RefreshSector;
         _campaign.CampaignDisplayChanged -= RefreshAllConsoles;
         _interdiction.InterdictionChanged -= RefreshSector;
+        _drives.DriveDisplayChanged -= RefreshShuttle;
         base.Shutdown();
     }
 
@@ -204,9 +207,25 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
                                   sector.ForeignGrids.Contains(shuttleUid.Value) &&
                                   _encounters.CanReturn(sectorMap, shuttleUid.Value, out _) &&
                                   !interdicted;
+        // A jump also needs the drive: charged and powered for any jump, plus enough fuel for the
+        // destination's cost (the current node's cost when returning to departure).
+        var drive = shuttleUid != null ? _drives.GetStatus(shuttleUid.Value) : default;
+        bool CanJump(int fuelCost) =>
+            !_drives.Required ||
+            drive.HasDrive && drive.Powered && drive.Charge >= 1f && drive.FuelUnits >= _drives.FuelRequired(fuelCost);
+
         var canReturnToDeparture = canLeaveCurrentNode &&
-                                   sector!.ReturnDestinations.ContainsKey(shuttleUid!.Value);
-        var starmapNodes = BuildStarmapNodes(starmap, currentNodeId, sector, canLeaveCurrentNode);
+                                   sector!.ReturnDestinations.ContainsKey(shuttleUid!.Value) &&
+                                   CanJump(_travel.GetNodeFuelCost(sectorMap));
+        var starmapNodes = BuildStarmapNodes(starmap, currentNodeId, sector, canLeaveCurrentNode, CanJump);
+        var driveState = shuttleUid == null
+            ? null
+            : new NsvBluespaceDriveState(
+                _drives.Required,
+                drive.HasDrive,
+                drive.Powered,
+                (int) (drive.Charge * 100),
+                NsvBluespaceDriveSystem.ToSheets(drive.FuelUnits));
         return new NsvBluespaceNavigationConsoleState(
             sectorName,
             sectorDescription,
@@ -225,14 +244,16 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
             canReturnToDeparture,
             _campaign.TryBuildSummary(),
             encounterProgress,
-            interdicted);
+            interdicted,
+            driveState);
     }
 
     private List<NsvBluespaceStarmapNodeState> BuildStarmapNodes(
         NsvBluespaceStarmapPrototype? starmap,
         string? currentNodeId,
         NsvBluespaceSectorInstanceComponent? sector,
-        bool canLeaveCurrentNode)
+        bool canLeaveCurrentNode,
+        Func<int, bool> canJumpWithFuelCost)
     {
         var result = new List<NsvBluespaceStarmapNodeState>();
         if (starmap == null)
@@ -242,8 +263,10 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         foreach (var node in starmap.NodeDefinitions)
         {
             var isCurrent = node.ID == currentNodeId;
-            var isSelectable = !isCurrent && (canSelectAnyNode ||
-                canLeaveCurrentNode && currentNodeId != null && starmap.IsConnected(currentNodeId, node.ID));
+            var isSelectable = !isCurrent &&
+                               (canSelectAnyNode ||
+                                canLeaveCurrentNode && currentNodeId != null && starmap.IsConnected(currentNodeId, node.ID)) &&
+                               canJumpWithFuelCost(node.FuelCost);
             var encounterNames = node.EncounterPool
                 .Select(id => _prototypes.Index<NsvBluespaceEncounterPrototype>(id).Name.ToString())
                 .ToList();

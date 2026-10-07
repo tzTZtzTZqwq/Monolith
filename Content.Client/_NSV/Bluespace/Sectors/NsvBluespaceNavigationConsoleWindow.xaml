@@ -301,6 +301,12 @@
                                                        HorizontalExpand="True"
                                                        Align="Right"
                                                        FontColorOverride="#00ff2a"/>
+                                                <Label Text="{Loc 'nsv-bluespace-console-caption-drive'}" FontColorOverride="#00ff2a"/>
+                                                <Label Name="DriveStatusValue"
+                                                       Text="—"
+                                                       HorizontalExpand="True"
+                                                       Align="Right"
+                                                       FontColorOverride="#00ff2a"/>
                                             </GridContainer>
                                             <Label Name="SelectedNodeDescriptionValue"
                                                    Text="—"

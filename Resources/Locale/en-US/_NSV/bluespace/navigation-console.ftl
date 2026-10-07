@@ -136,3 +136,14 @@ nsv-campaign-phase-ended = Ended
 nsv-campaign-objective-performjumps = Perform bluespace jumps
 nsv-campaign-objective-status-inprogress = In progress
 nsv-campaign-objective-status-completed = Completed
+nsv-bluespace-drive-missing = This shuttle has no bluespace jump core.
+nsv-bluespace-drive-unpowered = The bluespace jump core has no power.
+nsv-bluespace-drive-charging = The bluespace jump core is still charging ({ $percent }%).
+nsv-bluespace-drive-no-fuel = Not enough plasma in the jump core ({ $fuel }/{ $required } sheets).
+nsv-bluespace-drive-examine = Jump charge: [color=cyan]{ $percent }%[/color]. Plasma: [color=violet]{ $fuel }[/color] sheets.
+nsv-bluespace-console-caption-drive = Jump core
+nsv-bluespace-console-drive-none = Not installed
+nsv-bluespace-console-drive-unpowered = No power · { $fuel } plasma sheets
+nsv-bluespace-console-drive-charging = Charging { $percent }% · { $fuel } plasma sheets
+nsv-bluespace-console-drive-ready = Ready · { $fuel } plasma sheets
+nsv-bluespace-console-drive-not-required = Not required

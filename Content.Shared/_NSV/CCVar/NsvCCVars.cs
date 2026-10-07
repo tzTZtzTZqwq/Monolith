@@ -154,6 +154,26 @@ public sealed class NsvCCVars
     /// Seconds a Hold encounter requires the crew to survive in a hostile node before it completes.
     /// Extraction stays gated for the whole duration, so this is how long the crew is pinned under fire.
     /// </summary>
+    /// <summary>
+    /// Whether bluespace jumps (starmap travel and returning to departure) need a powered, fully
+    /// charged, fuelled NSV bluespace drive aboard (N4). Off lets any shuttle jump freely, as before.
+    /// </summary>
+    public static readonly CVarDef<bool> BluespaceDriveRequired =
+        CVarDef.Create("nsv.bluespace.drive.required", true, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Seconds for a powered bluespace drive to charge from empty to full. An unpowered drive loses
+    /// charge at the same rate.
+    /// </summary>
+    public static readonly CVarDef<float> BluespaceDriveChargeTime =
+        CVarDef.Create("nsv.bluespace.drive.charge_time", 60f, CVar.SERVERONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Fuel material units burned per point of a node's fuel cost. 100 units = one plasma sheet.
+    /// </summary>
+    public static readonly CVarDef<int> BluespaceDriveFuelPerCost =
+        CVarDef.Create("nsv.bluespace.drive.fuel_per_cost", 100, CVar.SERVERONLY | CVar.ARCHIVE);
+
     public static readonly CVarDef<float> EncounterHoldDuration =
         CVarDef.Create("nsv.bluespace.encounter.hold_duration", 300f, CVar.SERVERONLY | CVar.ARCHIVE);
 }

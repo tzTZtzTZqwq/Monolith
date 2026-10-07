@@ -63,6 +63,15 @@
 - **成本：** M，需要先定义「全舰结构度」，例如按网格瓦片或关键实体的完好比例。与 N1（自动旗舰）、N2（降级）天然配合。
 
 #### N4. FTL 充能、燃料与电力
+
+> **实现状态：✅ 已实现（2026-10-07）。** 用户选定复用 CTLA-160 重型蓝空核心的图像和机器。
+> - **原型 `NSVBluespaceDriveCore`**（`Resources/Prototypes/_NSV/Bluespace/Drive/drive.yml`）：继承 `MachineHeavyFTLDriveCore`，保留外观、15 kW 耗电、2500 耐久和原有 `FTLDrive`（普通控制台 FTL 照常可用）；新增 `NsvBluespaceDrive` 组件和只收等离子的材料存储（上限 30 张板材，手持板材点击驱动器即可装填）。配套的 CTLA-160 控制台保持原样（电力监控台）。
+> - **`NsvBluespaceDriveSystem`**（`Content.Server/_NSV/Bluespace/Sectors/`）：有电时充能，`nsv.bluespace.drive.charge_time`（默认 60s）充满；断电按同样速度流失；驱动器被毁，充能和燃料一起丢失。
+> - **跃迁条件**（`NsvBluespaceSectorTravelSystem` 的三条路径）：船上有一台**有电、充满**的驱动器，且燃料 ≥ 节点 `fuelCost` × `nsv.bluespace.drive.fuel_per_cost`（默认 100 单位 = 1 张板材）。跳往节点按目标节点计费；**返航按当前节点计费**（用户选择，与普通跃迁相同）；进入模板星区不耗燃料但要充能。检查在创建目标星区之前完成，失败没有副作用；FTL 真正启动后才清空充能、扣燃料。
+> - **开关：** `nsv.bluespace.drive.required`（默认 true）。关掉则恢复「任何船都能跳」。集成测试默认关闭（`PoolManager.Cvars`），驱动器测试自行打开。
+> - **导航台：** 星图页节点详情里新增「Jump core」一行：未安装 / 无电 / 充能百分比 / 就绪，以及板材数；燃料不够的节点不可选，跃迁和返航按钮按条件禁用，尝试跃迁时弹出具体原因（缺核心、无电、充能中 x%、燃料 x/y）。充能每跨过 5% 刷新一次控制台。
+> - **注意：** 在 N1（旗舰）落地前，玩家船上默认没有这台驱动器。默认开启时，要先用管理员生成 `NSVBluespaceDriveCore` 装到船上，或把 `nsv.bluespace.drive.required` 设为 false。
+> - **测试：** `NsvBluespaceDriveTest.DriveChargesWhilePoweredAndJumpSpendsChargeAndFuel`、`TravelRefusedWithoutDriveBeforeCreatingSector`。
 - **参考：** 04 FTL-003/004/005，13 ENG-017/023，02 STARSYS-006。
 - **NSV13：** 跃迁前要由工程部门给驱动塔供燃料和电力，塔越多充得越快；塔被打掉，充能流失、跃迁取消。跃迁和护盾、武器争同一份电力预算。
 - **现状：**

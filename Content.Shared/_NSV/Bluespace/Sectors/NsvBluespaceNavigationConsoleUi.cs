@@ -129,6 +129,9 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
     // A hostile FTL interdictor in this sector is holding the shuttle in place.
     public readonly bool Interdicted;
 
+    // The shuttle's bluespace jump core, or null when the console isn't on a shuttle.
+    public readonly NsvBluespaceDriveState? Drive;
+
     public NsvBluespaceNavigationConsoleState(
         string sectorName,
         string sectorDescription,
@@ -147,7 +150,8 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         bool canReturnToDeparture = false,
         NsvCampaignSummaryState? campaign = null,
         NsvBluespaceEncounterProgressState? encounterProgress = null,
-        bool interdicted = false)
+        bool interdicted = false,
+        NsvBluespaceDriveState? drive = null)
     {
         SectorName = sectorName;
         SectorDescription = sectorDescription;
@@ -167,6 +171,29 @@ public sealed class NsvBluespaceNavigationConsoleState : BoundUserInterfaceState
         Campaign = campaign;
         EncounterProgress = encounterProgress;
         Interdicted = interdicted;
+        Drive = drive;
+    }
+}
+
+/// <summary>
+/// The shuttle's bluespace jump core as the navigation console shows it.
+/// </summary>
+[Serializable, NetSerializable]
+public sealed class NsvBluespaceDriveState
+{
+    public readonly bool Required;
+    public readonly bool HasDrive;
+    public readonly bool Powered;
+    public readonly int ChargePercent;
+    public readonly float FuelSheets;
+
+    public NsvBluespaceDriveState(bool required, bool hasDrive, bool powered, int chargePercent, float fuelSheets)
+    {
+        Required = required;
+        HasDrive = hasDrive;
+        Powered = powered;
+        ChargePercent = chargePercent;
+        FuelSheets = fuelSheets;
     }
 }
 

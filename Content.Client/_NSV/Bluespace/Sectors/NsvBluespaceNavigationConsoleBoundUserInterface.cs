@@ -136,6 +136,28 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
 
         UpdateSelectedNode();
         ReturnButton.Disabled = !state.CanReturnToDeparture;
+        DriveStatusValue.Text = GetDriveText(state.Drive);
+    }
+
+    private static string GetDriveText(NsvBluespaceDriveState? drive)
+    {
+        if (drive == null)
+            return "—";
+
+        if (!drive.HasDrive)
+        {
+            return Loc.GetString(drive.Required
+                ? "nsv-bluespace-console-drive-none"
+                : "nsv-bluespace-console-drive-not-required");
+        }
+
+        if (!drive.Powered)
+            return Loc.GetString("nsv-bluespace-console-drive-unpowered", ("fuel", drive.FuelSheets));
+
+        return drive.ChargePercent >= 100
+            ? Loc.GetString("nsv-bluespace-console-drive-ready", ("fuel", drive.FuelSheets))
+            : Loc.GetString("nsv-bluespace-console-drive-charging",
+                ("percent", drive.ChargePercent), ("fuel", drive.FuelSheets));
     }
 
     protected override void FrameUpdate(FrameEventArgs args)
