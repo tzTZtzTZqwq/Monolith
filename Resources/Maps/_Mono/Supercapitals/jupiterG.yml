@@ -36265,7 +36265,7 @@ entities:
       rot: -1.5707963267948966 rad
       pos: -13.5,39.5
       parent: 1
-- proto: SpawnPointPirateCaptain
+- proto: SpawnPointNsvCaptain
   entities:
   - uid: 14393
     components:
@@ -36490,38 +36490,6 @@ entities:
       powerLoad: 5
     - type: Battery
       startingCharge: 0
-- proto: SpawnPointPirateFirstMate
-  entities:
-  - uid: 14686
-    components:
-    - type: Transform
-      pos: -6.5,23.5
-      parent: 1
-  - uid: 14695
-    components:
-    - type: Transform
-      pos: -3.5,23.5
-      parent: 1
-  - uid: 16244
-    components:
-    - type: Transform
-      pos: 15.5,37.5
-      parent: 1
-  - uid: 16923
-    components:
-    - type: Transform
-      pos: -17.5,44.5
-      parent: 1
-  - uid: 16929
-    components:
-    - type: Transform
-      pos: -15.5,44.5
-      parent: 1
-  - uid: 16936
-    components:
-    - type: Transform
-      pos: -13.5,44.5
-      parent: 1
 - proto: ShipBattlemap
   entities:
   - uid: 14688
@@ -36597,7 +36565,7 @@ entities:
       powerLoad: 5
     - type: Battery
       startingCharge: 0
-- proto: SpawnPointPirate
+- proto: SpawnPointNsvCrew
   entities:
   - uid: 14822
     components:
@@ -36625,6 +36593,36 @@ entities:
       pos: -15.5,44.5
       parent: 1
   - uid: 16935
+    components:
+    - type: Transform
+      pos: -13.5,44.5
+      parent: 1
+  - uid: 14686
+    components:
+    - type: Transform
+      pos: -6.5,23.5
+      parent: 1
+  - uid: 14695
+    components:
+    - type: Transform
+      pos: -3.5,23.5
+      parent: 1
+  - uid: 16244
+    components:
+    - type: Transform
+      pos: 15.5,37.5
+      parent: 1
+  - uid: 16923
+    components:
+    - type: Transform
+      pos: -17.5,44.5
+      parent: 1
+  - uid: 16929
+    components:
+    - type: Transform
+      pos: -15.5,44.5
+      parent: 1
+  - uid: 16936
     components:
     - type: Transform
       pos: -13.5,44.5

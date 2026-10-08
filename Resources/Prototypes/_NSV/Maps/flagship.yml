@@ -1,0 +1,49 @@
+# N1: the pure-campaign round map. The whole round is one ship: jupiterG loaded as the station grid,
+# every player spawning aboard it. The grid is auto-marked as the campaign flagship (losing it loses
+# the round) and given an IFF, so no admin setup is needed.
+
+- type: gameMapPool
+  id: NsvFlagshipMapPool
+  maps:
+  - NsvJupiterG
+
+- type: gameMap
+  id: NsvJupiterG
+  mapName: Jupiter
+  mapPath: /Maps/_Mono/Supercapitals/jupiterG.yml
+  isGrid: true # jupiterG is a lone ship grid, not a map
+  minPlayers: 0
+  randomRotation: false
+  maxRandomOffset: 0
+  stations:
+    Jupiter: # must match the grid's BecomesStation id
+      stationProto: NsvFlagshipStation
+      gridComponents:
+      - type: IFF
+        color: "#3C6E9E"
+      - type: NsvCampaignFlagship
+      components:
+      - type: StationNameSetup
+        mapNameTemplate: "Jupiter"
+      - type: ExtraStationInformation
+        icon: /Textures/_Mono/Logo/icon/icon-256x256.png
+        stationSubtext: nsv-flagship-lobby-subtext
+        stationDescription: nsv-flagship-lobby-description
+      - type: StationJobs
+        availableJobs:
+          NsvCaptain: [ 1, 1 ]
+          NsvCrew: [ -1, -1 ]
+
+# Jobs + spawning, crew records, and the sector services (bank, records, alert levels). Without the
+# sector services host, banks and records silently stop working.
+- type: entity
+  id: NsvFlagshipStation
+  parent:
+  - BaseStation
+  - BaseStationJobsSpawning
+  - BaseStationRecords
+  - BaseStationSectorServices
+  - BaseStationSiliconLawFrontierShips
+  categories: [ HideSpawnMenu ]
+  components:
+  - type: Transform

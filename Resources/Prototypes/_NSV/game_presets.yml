@@ -19,3 +19,18 @@
   - ManualPortstrikeTsfPdv
   - StarSystemKyphrus
   - NsvCampaign
+
+# N1: pure NSV campaign. The round is one flagship (jupiterG via NsvFlagshipMapPool) with everyone
+# spawning aboard as captain or crew; no Frontier outposts, shipyards or bought ships, and no
+# station event schedulers (they target outposts that don't exist here). The campaign rule ends the
+# round (outcome vote, flagship lost, or a scored return home). Admin-selectable only while WIP.
+- type: gamePreset
+  id: MonoNsvFlagship
+  alias:
+  - nsvflagship
+  name: mono-nsv-flagship-title
+  description: mono-nsv-flagship-description
+  showInVote: false
+  supportedMaps: NsvFlagshipMapPool
+  rules:
+  - NsvCampaign

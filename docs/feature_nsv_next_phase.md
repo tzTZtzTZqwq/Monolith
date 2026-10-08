@@ -36,6 +36,15 @@
 ### 第一梯队：没有它们，NSV 核心循环立不起来
 
 #### N1. 开局全员在旗舰出生 + 战舰岗位与权限
+
+> **实现状态：🟡 测试版已实现（2026-10-08），纯 YAML，不改 C#。** 用户定：纯战役、旗舰用 jupiterG、岗位先只有舰长和船员。
+> - **新预设 `MonoNsvFlagship`（别名 `nsvflagship`）**：只有 `NsvCampaign` 规则，`supportedMaps: NsvFlagshipMapPool` 强制用旗舰地图；不带 NFAdventure（前哨站、船坞、买船）和各种事件调度器。旧的 `MonoNsvCampaign`（NFAdventure + campaign）保持不动。
+> - **游戏地图 `NsvJupiterG`**（`Resources/Prototypes/_NSV/Maps/flagship.yml`）：`isGrid: true` 加载 jupiterG 这个单网格，关闭随机旋转和偏移；`gridComponents` 直接给船加 IFF 和 `NsvCampaignFlagship`，**自动成为 campaign 旗舰**，不再需要管理员 verb。站点 key 必须是船上 `BecomesStation` 的 `Jupiter`。
+> - **站点 `NsvFlagshipStation`**：继承基础站点、岗位出生、船员记录、扇区服务（缺了扇区服务，银行和记录会静默失效）。
+> - **岗位**（`Resources/Prototypes/_NSV/Roles/Jobs/flagship_jobs.yml`，部门 `NsvFlagship`）：`NsvCaptain` 1 人（AllAccess + General + Pirate + GrandVizier + PDVCommand），`NsvCrew` 不限（General + Pirate）；都不设游玩时长要求。权限按 jupiterG 原有的海盗门禁配，不改门。
+> - **出生点**：新增 `SpawnPointNsvCaptain` / `SpawnPointNsvCrew`；jupiterG 上原来的 2 个海盗船长点换成舰长点，6 个海盗 + 6 个大副点合并成 12 个船员点，位置不动；保留原有的 1 个 late-join 点。
+> - **测试**：`NsvFlagshipGameMapTest`（按游戏地图加载后成为站点、两个岗位和名额、自动旗舰和 IFF、各岗位都有出生点）、`NsvJupiterGMapTest`（地图加载无错误、跃迁核心/控制台/导航台各一台）。
+> - **已知限制**：服务器设置了 `game.map` 会覆盖预设的地图选择；世界生成仍会在船附近放小行星等杂物；没有撤离船，回合靠 campaign 规则结束。岗位、装备、游玩时长要求都是测试版，之后再细化。
 - **参考：** 25 JOB-001/005/007，22 SEC-012。
 - **NSV13：** 全体玩家开局就是同一艘战舰的船员。新增 Munitions（军械）部门和 Bridge、Pilot、MAA、军械技师等岗位；军械类权限决定谁能用火控、战斗机和弹药设备。
 - **现状：**

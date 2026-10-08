@@ -1,0 +1,78 @@
+# N1: the flagship crew for the pure-campaign preset (MonoNsvFlagship). Two jobs for testing: one
+# captain and an open crew roster. No playtime requirements yet. jupiterG's doors use pirate
+# access (Pirate, plus GrandVizier on the captain's hatch), so the jobs carry those.
+
+- type: job
+  id: NsvCaptain
+  name: job-name-nsv-captain
+  description: job-description-nsv-captain
+  playTimeTracker: JobNsvCaptain
+  startingGear: NsvCaptainGear
+  alwaysUseSpawner: true
+  icon: "JobIconCaptain"
+  supervisors: job-supervisors-nsv-command
+  canBeAntag: false
+  setPreference: true
+  weight: 20
+  displayWeight: 20
+  accessGroups:
+  - AllAccess
+  - GeneralAccess
+  access:
+  - Pirate
+  - GrandVizier
+  - PDVCommand
+
+- type: job
+  id: NsvCrew
+  name: job-name-nsv-crew
+  description: job-description-nsv-crew
+  playTimeTracker: JobNsvCrew
+  startingGear: NsvCrewGear
+  alwaysUseSpawner: true
+  icon: "JobIconPassenger"
+  supervisors: job-supervisors-nsv-captain
+  canBeAntag: false
+  setPreference: true
+  weight: 10
+  displayWeight: 10
+  accessGroups:
+  - GeneralAccess
+  access:
+  - Pirate
+
+- type: startingGear
+  id: NsvCaptainGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitCaptain
+    head: ClothingHeadHatCaptain
+    shoes: ClothingShoesBootsJack
+    ears: ClothingHeadsetAltCommand
+    back: ClothingBackpack
+    id: CaptainPDA
+
+- type: startingGear
+  id: NsvCrewGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitColorGrey
+    shoes: ClothingShoesColorBlack
+    ears: ClothingHeadsetGrey
+    back: ClothingBackpack
+    id: PassengerPDA
+
+- type: playTimeTracker
+  id: JobNsvCaptain
+
+- type: playTimeTracker
+  id: JobNsvCrew
+
+- type: department
+  id: NsvFlagship
+  name: department-NsvFlagship
+  description: department-NsvFlagship-description
+  color: "#3C6E9E"
+  weight: 140
+  primary: true
+  roles:
+  - NsvCaptain
+  - NsvCrew

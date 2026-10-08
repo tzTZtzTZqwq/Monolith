@@ -1,0 +1,24 @@
+# Round-start spawn points for the flagship jobs (N1). jupiterG's old pirate spawn markers were
+# swapped for these in place: pirate captain -> NSV captain, first mate and pirate -> NSV crew.
+
+- type: entity
+  id: SpawnPointNsvCaptain
+  parent: SpawnPointJobBase
+  name: NSV captain
+  components:
+  - type: SpawnPoint
+    job_id: NsvCaptain
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-blue
+
+- type: entity
+  id: SpawnPointNsvCrew
+  parent: SpawnPointJobBase
+  name: NSV crew
+  components:
+  - type: SpawnPoint
+    job_id: NsvCrew
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-blue
