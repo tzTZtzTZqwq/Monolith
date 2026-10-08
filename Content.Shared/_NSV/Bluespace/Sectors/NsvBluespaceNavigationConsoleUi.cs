@@ -186,14 +186,25 @@ public sealed class NsvBluespaceDriveState
     public readonly bool Powered;
     public readonly int ChargePercent;
     public readonly float FuelSheets;
+    public readonly bool HasConsole;
+    public readonly bool ConsolePowered;
 
-    public NsvBluespaceDriveState(bool required, bool hasDrive, bool powered, int chargePercent, float fuelSheets)
+    public NsvBluespaceDriveState(
+        bool required,
+        bool hasDrive,
+        bool powered,
+        int chargePercent,
+        float fuelSheets,
+        bool hasConsole,
+        bool consolePowered)
     {
         Required = required;
         HasDrive = hasDrive;
         Powered = powered;
         ChargePercent = chargePercent;
         FuelSheets = fuelSheets;
+        HasConsole = hasConsole;
+        ConsolePowered = consolePowered;
     }
 }
 

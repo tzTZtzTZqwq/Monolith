@@ -11,3 +11,23 @@
   - type: MaterialStorage
     storageLimit: 3000 # 30 plasma sheets
     materialWhiteList: [Plasma]
+
+# The CTLA-160 console that pairs with the jump core: a jump needs one aboard and powered. Its main
+# window shows the core's charge, plasma and power; the original power monitor stays on the
+# right-click menu.
+- type: entity
+  id: NSVBluespaceDriveConsole
+  parent: MachineHeavyFTLDriveConsole
+  name: CTLA-160 bluespace jump console
+  description: The control console for a CTLA-160 bluespace jump core. A jump needs both, powered. Shows the core's charge and plasma; its power monitor is still in the context menu.
+  components:
+  - type: NsvBluespaceDriveConsole
+  - type: ActivatableUI
+    singleUser: false
+    key: enum.NsvBluespaceDriveConsoleUiKey.Key
+  - type: UserInterface
+    interfaces:
+      enum.NsvBluespaceDriveConsoleUiKey.Key:
+        type: NsvBluespaceDriveConsoleBoundUserInterface
+      enum.PowerMonitoringConsoleUiKey.Key:
+        type: PowerMonitoringConsoleBoundUserInterface

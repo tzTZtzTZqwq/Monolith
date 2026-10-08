@@ -151,7 +151,10 @@ public sealed partial class NsvBluespaceNavigationConsoleWindow : FancyWindow
                 : "nsv-bluespace-console-drive-not-required");
         }
 
-        if (!drive.Powered)
+        if (drive.Required && !drive.HasConsole)
+            return Loc.GetString("nsv-bluespace-console-drive-no-console");
+
+        if (!drive.Powered || drive.Required && !drive.ConsolePowered)
             return Loc.GetString("nsv-bluespace-console-drive-unpowered", ("fuel", drive.FuelSheets));
 
         return drive.ChargePercent >= 100

@@ -3,8 +3,12 @@ using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared._NSV.CCVar;
 using Content.Shared.Examine;
 using Content.Shared.Materials;
+using Content.Shared.Power;
+using Content.Shared.Verbs;
+using Robust.Server.GameObjects;
 using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Utility;
 
 namespace Content.Server._NSV.Bluespace.Sectors;
 
@@ -29,10 +33,26 @@ public sealed partial class NsvBluespaceDriveComponent : Component
     public bool LastPowered;
 }
 
-public readonly record struct NsvBluespaceDriveStatus(bool HasDrive, bool Powered, float Charge, int FuelUnits);
+/// <summary>
+/// The CTLA-160 jump console that pairs with the core: a jump needs one aboard and powered. Its main
+/// window shows the core's state; the original power monitor is still one right-click away.
+/// </summary>
+[RegisterComponent]
+public sealed partial class NsvBluespaceDriveConsoleComponent : Component
+{
+}
+
+public readonly record struct NsvBluespaceDriveStatus(
+    bool HasDrive,
+    bool Powered,
+    float Charge,
+    int FuelUnits,
+    bool HasConsole,
+    bool ConsolePowered);
 
 /// <summary>
-/// Charges drives, gates bluespace jumps on them, and spends charge and fuel when a jump engages.
+/// Charges drives, gates bluespace jumps on a core + console pair, and spends charge and fuel when a
+/// jump engages.
 /// </summary>
 public sealed partial class NsvBluespaceDriveSystem : EntitySystem
 {
@@ -43,10 +63,12 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
     private const int DisplaySteps = 20;
 
     [Dependency] private SharedMaterialStorageSystem _materials = default!;
+    [Dependency] private UserInterfaceSystem _ui = default!;
     [Dependency] private IConfigurationManager _cfg = default!;
 
     /// <summary>
-    /// Raised with the drive's grid when its visible state (charge step, power) changes.
+    /// Raised with the ship's grid when its jump core or console visibly changes (charge step, power,
+    /// fuel, a part added or destroyed).
     /// </summary>
     public event Action<EntityUid>? DriveDisplayChanged;
 
@@ -54,7 +76,15 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
     {
         base.Initialize();
         SubscribeLocalEvent<NsvBluespaceDriveComponent, ExaminedEvent>(OnExamined);
-        SubscribeLocalEvent<NsvBluespaceDriveComponent, ComponentShutdown>(OnShutdown);
+        SubscribeLocalEvent<NsvBluespaceDriveComponent, ComponentStartup>(OnPartChanged);
+        SubscribeLocalEvent<NsvBluespaceDriveComponent, ComponentShutdown>(OnPartChanged);
+        SubscribeLocalEvent<NsvBluespaceDriveComponent, MaterialAmountChangedEvent>(OnFuelChanged);
+
+        SubscribeLocalEvent<NsvBluespaceDriveConsoleComponent, ComponentStartup>(OnPartChanged);
+        SubscribeLocalEvent<NsvBluespaceDriveConsoleComponent, ComponentShutdown>(OnPartChanged);
+        SubscribeLocalEvent<NsvBluespaceDriveConsoleComponent, PowerChangedEvent>(OnConsolePowerChanged);
+        SubscribeLocalEvent<NsvBluespaceDriveConsoleComponent, BoundUIOpenedEvent>(OnConsoleOpened);
+        SubscribeLocalEvent<NsvBluespaceDriveConsoleComponent, GetVerbsEvent<AlternativeVerb>>(OnConsoleVerbs);
     }
 
     public override void Shutdown()
@@ -81,7 +111,7 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
             drive.LastDisplayedStep = step;
             drive.LastPowered = powered;
             if (xform.GridUid is { } grid)
-                DriveDisplayChanged?.Invoke(grid);
+                NotifyChanged(grid);
         }
     }
 
@@ -118,14 +148,28 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
 
     public NsvBluespaceDriveStatus GetStatus(EntityUid shuttleUid)
     {
+        var hasConsole = false;
+        var consolePowered = false;
+        var consoles = AllEntityQuery<NsvBluespaceDriveConsoleComponent, TransformComponent>();
+        while (consoles.MoveNext(out var console, out _, out var xform))
+        {
+            if (xform.GridUid != shuttleUid || TerminatingOrDeleted(console))
+                continue;
+
+            hasConsole = true;
+            consolePowered |= this.IsPowered(console, EntityManager);
+        }
+
         if (!TryGetDrive(shuttleUid, out var drive))
-            return new NsvBluespaceDriveStatus(false, false, 0f, 0);
+            return new NsvBluespaceDriveStatus(false, false, 0f, 0, hasConsole, consolePowered);
 
         return new NsvBluespaceDriveStatus(
             true,
             this.IsPowered(drive, EntityManager),
             drive.Comp.Charge,
-            _materials.GetMaterialAmount(drive, drive.Comp.FuelMaterial));
+            _materials.GetMaterialAmount(drive, drive.Comp.FuelMaterial),
+            hasConsole,
+            consolePowered);
     }
 
     /// <summary>
@@ -143,15 +187,24 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
     public bool CanJump(EntityUid shuttleUid, int fuelCost, out string? reason)
     {
         reason = null;
-        if (!Required)
-            return true;
+        return !Required || CanJump(GetStatus(shuttleUid), fuelCost, out reason);
+    }
 
-        var status = GetStatus(shuttleUid);
+    /// <summary>
+    /// The jump rules applied to an already-read <paramref name="status"/>, so callers that check many
+    /// destinations (the navigation console) read the ship once. Ignores <see cref="Required"/>.
+    /// </summary>
+    public bool CanJump(NsvBluespaceDriveStatus status, int fuelCost, out string? reason)
+    {
         var required = FuelRequired(fuelCost);
         if (!status.HasDrive)
             reason = Loc.GetString("nsv-bluespace-drive-missing");
+        else if (!status.HasConsole)
+            reason = Loc.GetString("nsv-bluespace-drive-no-console");
         else if (!status.Powered)
             reason = Loc.GetString("nsv-bluespace-drive-unpowered");
+        else if (!status.ConsolePowered)
+            reason = Loc.GetString("nsv-bluespace-drive-console-unpowered");
         else if (status.Charge < 1f)
             reason = Loc.GetString("nsv-bluespace-drive-charging", ("percent", (int) (status.Charge * 100)));
         else if (status.FuelUnits < required)
@@ -159,13 +212,15 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
             reason = Loc.GetString("nsv-bluespace-drive-no-fuel",
                 ("fuel", ToSheets(status.FuelUnits)), ("required", ToSheets(required)));
         }
+        else
+            reason = null;
 
         return reason == null;
     }
 
     /// <summary>
     /// Spends a jump: empties the drive's charge and burns the jump's fuel. Call once the FTL has
-    /// actually engaged, after <see cref="CanJump"/> passed.
+    /// actually engaged, after <see cref="CanJump(EntityUid, int, out string?)"/> passed.
     /// </summary>
     public void ConsumeJump(EntityUid shuttleUid, int fuelCost)
     {
@@ -177,12 +232,55 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
         if (required > 0)
             _materials.TryChangeMaterialAmount(drive, drive.Comp.FuelMaterial, -required);
 
-        DriveDisplayChanged?.Invoke(shuttleUid);
+        NotifyChanged(shuttleUid);
     }
 
     public static float ToSheets(int units)
     {
         return MathF.Round(units / (float) UnitsPerSheet, 1);
+    }
+
+    private void NotifyChanged(EntityUid grid)
+    {
+        UpdateConsoles(grid);
+        DriveDisplayChanged?.Invoke(grid);
+    }
+
+    /// <summary>
+    /// Pushes a fresh state to every jump console window open on <paramref name="grid"/>.
+    /// </summary>
+    private void UpdateConsoles(EntityUid grid)
+    {
+        var consoles = AllEntityQuery<NsvBluespaceDriveConsoleComponent, TransformComponent>();
+        while (consoles.MoveNext(out var console, out _, out var xform))
+        {
+            if (xform.GridUid == grid)
+                UpdateConsole(console, grid);
+        }
+    }
+
+    private void UpdateConsole(EntityUid console, EntityUid grid)
+    {
+        if (!_ui.IsUiOpen(console, NsvBluespaceDriveConsoleUiKey.Key))
+            return;
+
+        var status = GetStatus(grid);
+        var ready = CanJump(status, 0, out var reason);
+        var capacity = TryGetDrive(grid, out var drive) &&
+                       TryComp<MaterialStorageComponent>(drive, out var storage) &&
+                       storage.StorageLimit is { } limit
+            ? ToSheets(limit)
+            : 0f;
+
+        _ui.SetUiState(console, NsvBluespaceDriveConsoleUiKey.Key, new NsvBluespaceDriveConsoleState(
+            status.HasDrive,
+            status.Powered,
+            status.ConsolePowered,
+            (int) (status.Charge * 100),
+            ToSheets(status.FuelUnits),
+            capacity,
+            ready,
+            ready ? Loc.GetString("nsv-bluespace-drive-console-ready") : reason!));
     }
 
     private void OnExamined(Entity<NsvBluespaceDriveComponent> ent, ref ExaminedEvent args)
@@ -195,9 +293,44 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
             ("fuel", ToSheets(_materials.GetMaterialAmount(ent, ent.Comp.FuelMaterial)))));
     }
 
-    private void OnShutdown(Entity<NsvBluespaceDriveComponent> ent, ref ComponentShutdown args)
+    private void OnPartChanged<TComp, TEvent>(EntityUid uid, TComp component, TEvent args)
+    {
+        if (Transform(uid).GridUid is { } grid)
+            NotifyChanged(grid);
+    }
+
+    private void OnFuelChanged(Entity<NsvBluespaceDriveComponent> ent, ref MaterialAmountChangedEvent args)
     {
         if (Transform(ent).GridUid is { } grid)
-            DriveDisplayChanged?.Invoke(grid);
+            NotifyChanged(grid);
+    }
+
+    private void OnConsolePowerChanged(Entity<NsvBluespaceDriveConsoleComponent> ent, ref PowerChangedEvent args)
+    {
+        if (Transform(ent).GridUid is { } grid)
+            NotifyChanged(grid);
+    }
+
+    private void OnConsoleOpened(Entity<NsvBluespaceDriveConsoleComponent> ent, ref BoundUIOpenedEvent args)
+    {
+        if (Transform(ent).GridUid is { } grid)
+            UpdateConsole(ent, grid);
+    }
+
+    /// <summary>
+    /// Keeps the CTLA-160 console's original job: its power monitor opens from the right-click menu.
+    /// </summary>
+    private void OnConsoleVerbs(Entity<NsvBluespaceDriveConsoleComponent> ent, ref GetVerbsEvent<AlternativeVerb> args)
+    {
+        if (!args.CanAccess || !args.CanInteract || !_ui.HasUi(ent, PowerMonitoringConsoleUiKey.Key))
+            return;
+
+        var user = args.User;
+        args.Verbs.Add(new AlternativeVerb
+        {
+            Text = Loc.GetString("nsv-bluespace-drive-console-power-monitor"),
+            Icon = new SpriteSpecifier.Texture(new ResPath("/Textures/Interface/VerbIcons/light.svg.192dpi.png")),
+            Act = () => _ui.OpenUi(ent.Owner, PowerMonitoringConsoleUiKey.Key, user),
+        });
     }
 }

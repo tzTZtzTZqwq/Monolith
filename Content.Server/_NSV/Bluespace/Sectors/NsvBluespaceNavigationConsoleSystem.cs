@@ -210,9 +210,7 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
         // A jump also needs the drive: charged and powered for any jump, plus enough fuel for the
         // destination's cost (the current node's cost when returning to departure).
         var drive = shuttleUid != null ? _drives.GetStatus(shuttleUid.Value) : default;
-        bool CanJump(int fuelCost) =>
-            !_drives.Required ||
-            drive.HasDrive && drive.Powered && drive.Charge >= 1f && drive.FuelUnits >= _drives.FuelRequired(fuelCost);
+        bool CanJump(int fuelCost) => !_drives.Required || _drives.CanJump(drive, fuelCost, out _);
 
         var canReturnToDeparture = canLeaveCurrentNode &&
                                    sector!.ReturnDestinations.ContainsKey(shuttleUid!.Value) &&
@@ -225,7 +223,9 @@ public sealed class NsvBluespaceNavigationConsoleSystem : EntitySystem
                 drive.HasDrive,
                 drive.Powered,
                 (int) (drive.Charge * 100),
-                NsvBluespaceDriveSystem.ToSheets(drive.FuelUnits));
+                NsvBluespaceDriveSystem.ToSheets(drive.FuelUnits),
+                drive.HasConsole,
+                drive.ConsolePowered);
         return new NsvBluespaceNavigationConsoleState(
             sectorName,
             sectorDescription,

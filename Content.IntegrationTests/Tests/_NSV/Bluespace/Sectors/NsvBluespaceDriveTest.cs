@@ -16,6 +16,7 @@ namespace Content.IntegrationTests.Tests._NSV.Bluespace.Sectors;
 public sealed class NsvBluespaceDriveTest
 {
     private const string DrivePrototype = "NSVBluespaceDriveCore";
+    private const string ConsolePrototype = "NSVBluespaceDriveConsole";
 
     [Test]
     public async Task DriveChargesWhilePoweredAndJumpSpendsChargeAndFuel()
@@ -30,6 +31,7 @@ public sealed class NsvBluespaceDriveTest
         var materials = entityManager.System<SharedMaterialStorageSystem>();
         var shuttle = shipMap.Grid.Owner;
         var drive = EntityUid.Invalid;
+        var console = EntityUid.Invalid;
 
         await server.WaitAssertion(() =>
         {
@@ -42,10 +44,23 @@ public sealed class NsvBluespaceDriveTest
 
             drive = entityManager.SpawnEntity(DrivePrototype, shipMap.GridCoords);
             Assert.That(entityManager.GetComponent<TransformComponent>(drive).GridUid, Is.EqualTo(shuttle));
+            Assert.That(drives.CanJump(shuttle, 0, out var noConsole), Is.False);
+            Assert.That(noConsole, Is.EqualTo(Loc("nsv-bluespace-drive-no-console")), "the core needs its console");
+
+            console = entityManager.SpawnEntity(ConsolePrototype, shipMap.GridCoords);
             Assert.That(drives.CanJump(shuttle, 0, out var unpowered), Is.False);
             Assert.That(unpowered, Is.EqualTo(Loc("nsv-bluespace-drive-unpowered")));
 
             power.SetNeedsPower(drive, false);
+        });
+
+        // Mono runs the power solver every 0.5 s, so power changes take up to ~15 ticks to land.
+        await server.WaitRunTicks(30);
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(drives.CanJump(shuttle, 0, out var consoleUnpowered), Is.False);
+            Assert.That(consoleUnpowered, Is.EqualTo(Loc("nsv-bluespace-drive-console-unpowered")));
+            power.SetNeedsPower(console, false);
         });
 
         // A powered drive charges to full well within these ticks at a 0.2 s charge time.
@@ -79,6 +94,11 @@ public sealed class NsvBluespaceDriveTest
         await server.WaitAssertion(() =>
         {
             Assert.That(drives.GetStatus(shuttle).Charge, Is.EqualTo(0f), "an unpowered core doesn't charge");
+
+            // Destroying the console grounds the ship even with the core intact.
+            entityManager.DeleteEntity(console);
+            Assert.That(drives.CanJump(shuttle, 0, out var consoleGone), Is.False);
+            Assert.That(consoleGone, Is.EqualTo(Loc("nsv-bluespace-drive-no-console")));
 
             cfg.SetCVar(NsvCCVars.BluespaceDriveRequired, false);
             Assert.That(drives.CanJump(shuttle, 5, out _), Is.True, "nothing is required when drives are off");
