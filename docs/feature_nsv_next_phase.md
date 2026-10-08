@@ -65,7 +65,7 @@
 #### N4. FTL 充能、燃料与电力
 
 > **实现状态：✅ 已实现（2026-10-07）。** 用户选定复用 CTLA-160 重型蓝空核心的图像和机器。
-> - **原型 `NSVBluespaceDriveCore`**（`Resources/Prototypes/_NSV/Bluespace/Drive/drive.yml`）：继承 `MachineHeavyFTLDriveCore`，保留外观、15 kW 耗电、2500 耐久和原有 `FTLDrive`（普通控制台 FTL 照常可用）；新增 `NsvBluespaceDrive` 组件和只收等离子的材料存储（上限 30 张板材，手持板材点击驱动器即可装填）。
+> - **原型 `NSVBluespaceDriveCore`**（`Resources/Prototypes/_NSV/Bluespace/Drive/drive.yml`）：继承 `MachineHeavyFTLDriveCore`，保留外观、2500 耐久和原有 `FTLDrive`；耗电改为两档（充能时 `chargingLoad` 15 kW，充满后 `idleLoad` 1.5 kW，都写在 drive.yml 里），充能和护盾、武器抢电（普通控制台 FTL 照常可用）；新增 `NsvBluespaceDrive` 组件和只收等离子的材料存储（上限 30 张板材，手持板材点击驱动器即可装填）。
 > - **原型 `NSVBluespaceDriveConsole`（2026-10-08 补上，用户要求与原版一样成对）：** 继承 CTLA-160 控制台，跃迁要求同一艘船上核心**和**控制台都在、都有电，控制台被毁同样跳不了。点开是新的状态窗口（充能进度条、板材 x/30、核心和控制台的供电、当前能否跃迁及原因）；原来的电力监控挪到右键菜单「Open power monitor」。
 > - **`NsvBluespaceDriveSystem`**（`Content.Server/_NSV/Bluespace/Sectors/`）：有电时充能，`nsv.bluespace.drive.charge_time`（默认 60s）充满；断电按同样速度流失；驱动器被毁，充能和燃料一起丢失。
 > - **跃迁条件**（`NsvBluespaceSectorTravelSystem` 的三条路径）：船上有一台**有电、充满**的驱动器，且燃料 ≥ 节点 `fuelCost` × `nsv.bluespace.drive.fuel_per_cost`（默认 100 单位 = 1 张板材）。跳往节点按目标节点计费；**返航按当前节点计费**（用户选择，与普通跃迁相同）；进入模板星区不耗燃料但要充能。检查在创建目标星区之前完成，失败没有副作用；FTL 真正启动后才清空充能、扣燃料。

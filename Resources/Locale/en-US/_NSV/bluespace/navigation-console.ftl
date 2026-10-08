@@ -161,3 +161,5 @@ nsv-bluespace-drive-console-power-off = No power
 nsv-bluespace-drive-console-no-core = No core
 nsv-bluespace-drive-console-ready = Ready to jump.
 nsv-bluespace-drive-console-power-monitor = Open power monitor
+nsv-bluespace-drive-console-load = Core draw
+nsv-bluespace-drive-console-load-value = { $kw } kW

@@ -38,6 +38,7 @@ public sealed class NsvBluespaceDriveConsoleWindow : DefaultWindow
     private readonly Label _chargeValue;
     private readonly Label _fuelValue;
     private readonly Label _corePowerValue;
+    private readonly Label _loadValue;
     private readonly Label _consolePowerValue;
     private readonly Label _status;
 
@@ -50,6 +51,7 @@ public sealed class NsvBluespaceDriveConsoleWindow : DefaultWindow
         _chargeValue = new Label();
         _fuelValue = new Label();
         _corePowerValue = new Label();
+        _loadValue = new Label();
         _consolePowerValue = new Label();
         _status = new Label { Margin = new Thickness(0, 8, 0, 0) };
 
@@ -57,6 +59,7 @@ public sealed class NsvBluespaceDriveConsoleWindow : DefaultWindow
         AddRow(grid, "nsv-bluespace-drive-console-charge", _chargeValue);
         AddRow(grid, "nsv-bluespace-drive-console-fuel", _fuelValue);
         AddRow(grid, "nsv-bluespace-drive-console-core-power", _corePowerValue);
+        AddRow(grid, "nsv-bluespace-drive-console-load", _loadValue);
         AddRow(grid, "nsv-bluespace-drive-console-console-power", _consolePowerValue);
 
         var root = new BoxContainer { Orientation = BoxContainer.LayoutOrientation.Vertical, Margin = new Thickness(8) };
@@ -76,6 +79,9 @@ public sealed class NsvBluespaceDriveConsoleWindow : DefaultWindow
             : "—";
         SetPower(_corePowerValue, state.HasCore && state.CorePowered);
         SetPower(_consolePowerValue, state.ConsolePowered);
+        _loadValue.Text = state.HasCore
+            ? Loc.GetString("nsv-bluespace-drive-console-load-value", ("kw", MathF.Round(state.CoreLoadWatts / 1000f, 1)))
+            : "—";
         _status.Text = state.Status;
         _status.FontColorOverride = state.Ready ? Good : Bad;
     }

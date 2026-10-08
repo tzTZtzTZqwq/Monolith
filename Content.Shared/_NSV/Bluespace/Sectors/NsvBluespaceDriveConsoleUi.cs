@@ -24,6 +24,9 @@ public sealed class NsvBluespaceDriveConsoleState : BoundUserInterfaceState
     public readonly bool Ready;
     public readonly string Status;
 
+    // The core's current draw in watts: high while charging, low once full.
+    public readonly int CoreLoadWatts;
+
     public NsvBluespaceDriveConsoleState(
         bool hasCore,
         bool corePowered,
@@ -32,8 +35,10 @@ public sealed class NsvBluespaceDriveConsoleState : BoundUserInterfaceState
         float fuelSheets,
         float fuelCapacitySheets,
         bool ready,
-        string status)
+        string status,
+        int coreLoadWatts)
     {
+        CoreLoadWatts = coreLoadWatts;
         HasCore = hasCore;
         CorePowered = corePowered;
         ConsolePowered = consolePowered;

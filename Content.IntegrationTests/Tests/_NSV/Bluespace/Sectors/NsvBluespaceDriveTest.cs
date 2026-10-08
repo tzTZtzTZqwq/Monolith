@@ -1,5 +1,6 @@
 using System.Linq;
 using Content.Server._NSV.Bluespace.Sectors;
+using Content.Server.Power.Components;
 using Content.Shared._NSV.CCVar;
 using Content.Shared.Materials;
 using Content.Shared.Power.EntitySystems;
@@ -69,6 +70,8 @@ public sealed class NsvBluespaceDriveTest
         await server.WaitAssertion(() =>
         {
             Assert.That(drives.GetStatus(shuttle).Charge, Is.EqualTo(1f));
+            Assert.That(entityManager.GetComponent<ApcPowerReceiverComponent>(drive).Load, Is.EqualTo(1500f),
+                "a fully charged core drops to its idle draw");
             Assert.That(drives.CanJump(shuttle, 0, out _), Is.True, "a free jump only needs a charged, powered core");
             Assert.That(drives.CanJump(shuttle, 2, out var noFuel), Is.False);
             Assert.That(noFuel, Does.Contain("0/2"));
@@ -94,6 +97,8 @@ public sealed class NsvBluespaceDriveTest
         await server.WaitAssertion(() =>
         {
             Assert.That(drives.GetStatus(shuttle).Charge, Is.EqualTo(0f), "an unpowered core doesn't charge");
+            Assert.That(entityManager.GetComponent<ApcPowerReceiverComponent>(drive).Load, Is.EqualTo(15000f),
+                "an uncharged core asks for its full charging draw");
 
             // Destroying the console grounds the ship even with the core intact.
             entityManager.DeleteEntity(console);

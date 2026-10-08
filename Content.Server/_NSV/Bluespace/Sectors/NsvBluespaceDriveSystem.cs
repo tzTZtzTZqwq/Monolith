@@ -1,3 +1,4 @@
+using Content.Server.Power.Components;
 using Content.Server.Power.EntitySystems;
 using Content.Shared._NSV.Bluespace.Sectors;
 using Content.Shared._NSV.CCVar;
@@ -27,6 +28,19 @@ public sealed partial class NsvBluespaceDriveComponent : Component
 
     [DataField]
     public string FuelMaterial = "Plasma";
+
+    /// <summary>
+    /// Power draw (W) while charging. Spinning up a jump competes with shields and weapons for the
+    /// ship's power: if the grid can't supply this, the core goes unpowered and stops charging.
+    /// </summary>
+    [DataField]
+    public float ChargingLoad = 15000f;
+
+    /// <summary>
+    /// Power draw (W) once fully charged, just holding the charge.
+    /// </summary>
+    [DataField]
+    public float IdleLoad = 1500f;
 
     // Display bookkeeping so consoles refresh on visible changes, not every tick.
     public int LastDisplayedStep = -1;
@@ -64,6 +78,7 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
 
     [Dependency] private SharedMaterialStorageSystem _materials = default!;
     [Dependency] private UserInterfaceSystem _ui = default!;
+    [Dependency] private PowerReceiverSystem _power = default!;
     [Dependency] private IConfigurationManager _cfg = default!;
 
     /// <summary>
@@ -98,11 +113,16 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
     public override void Update(float frameTime)
     {
         var rate = frameTime / MathF.Max(0.01f, _cfg.GetCVar(NsvCCVars.BluespaceDriveChargeTime));
-        var query = EntityQueryEnumerator<NsvBluespaceDriveComponent, TransformComponent>();
-        while (query.MoveNext(out var uid, out var drive, out var xform))
+        var query = EntityQueryEnumerator<NsvBluespaceDriveComponent, ApcPowerReceiverComponent, TransformComponent>();
+        while (query.MoveNext(out var uid, out var drive, out var receiver, out var xform))
         {
-            var powered = this.IsPowered(uid, EntityManager);
+            var powered = this.IsPowered(uid, EntityManager, receiver);
             drive.Charge = Math.Clamp(drive.Charge + (powered ? rate : -rate), 0f, 1f);
+
+            // Heavy draw only while there's charging to do; a full core idles.
+            var load = drive.Charge < 1f ? drive.ChargingLoad : drive.IdleLoad;
+            if (!receiver.Load.Equals(load))
+                _power.SetLoad(receiver, load);
 
             var step = (int) (drive.Charge * DisplaySteps);
             if (step == drive.LastDisplayedStep && powered == drive.LastPowered)
@@ -266,11 +286,15 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
 
         var status = GetStatus(grid);
         var ready = CanJump(status, 0, out var reason);
-        var capacity = TryGetDrive(grid, out var drive) &&
+        var hasDrive = TryGetDrive(grid, out var drive);
+        var capacity = hasDrive &&
                        TryComp<MaterialStorageComponent>(drive, out var storage) &&
                        storage.StorageLimit is { } limit
             ? ToSheets(limit)
             : 0f;
+        var load = hasDrive && TryComp<ApcPowerReceiverComponent>(drive, out var receiver)
+            ? (int) receiver.Load
+            : 0;
 
         _ui.SetUiState(console, NsvBluespaceDriveConsoleUiKey.Key, new NsvBluespaceDriveConsoleState(
             status.HasDrive,
@@ -280,7 +304,8 @@ public sealed partial class NsvBluespaceDriveSystem : EntitySystem
             ToSheets(status.FuelUnits),
             capacity,
             ready,
-            ready ? Loc.GetString("nsv-bluespace-drive-console-ready") : reason!));
+            ready ? Loc.GetString("nsv-bluespace-drive-console-ready") : reason!,
+            load));
     }
 
     private void OnExamined(Entity<NsvBluespaceDriveComponent> ent, ref ExaminedEvent args)

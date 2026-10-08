@@ -1,5 +1,5 @@
-# N4: the NSV bluespace jump drive. Reuses the CTLA-160 heavy core's art, 15 kW power draw and
-# durability; adds the strategic jump charge and a plasma-sheet fuel store. Keeps the parent's
+# N4: the NSV bluespace jump drive. Reuses the CTLA-160 heavy core's art and
+# durability; draws 15 kW while charging and 1.5 kW once full; adds the strategic jump charge and a plasma-sheet fuel store. Keeps the parent's
 # FTLDrive so ordinary shuttle-console FTL still works.
 - type: entity
   id: NSVBluespaceDriveCore
@@ -8,6 +8,8 @@
   description: A heavy bluespace core refitted for strategic jumps. It charges while powered and burns plasma sheets with every jump; load them by hand.
   components:
   - type: NsvBluespaceDrive
+    chargingLoad: 15000 # W while charging (matches the CTLA-160 core's original draw)
+    idleLoad: 1500 # W once fully charged
   - type: MaterialStorage
     storageLimit: 3000 # 30 plasma sheets
     materialWhiteList: [Plasma]
