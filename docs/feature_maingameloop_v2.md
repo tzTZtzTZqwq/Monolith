@@ -8,6 +8,8 @@
 >
 > **进度速览（2026-10-02）：** ✅ S1 回合骨架 · ✅ S2 跳跃目标 · ✅ S3 三条结束条件（投票 / 旗舰被毁 Defeat / Home 抵达 Victory）· ✅ S4 击毁计分 + Home 胜利分数门禁 + Score 实时上屏 + 遭遇 Reward 权重结算（③零和按设计不做）· ✅ S5 击毁抬威胁 + 被动增长 + Threat 实时上屏 + 完成目标降威胁 · ✅ S6 遭遇类型扩充（可扩展事件分派 + Destroy / ClearSystem / Hold；Courier 待 cargo 交付信号）· ✅ S7 生成器 + faction-on-wake + 首访物化 + AI-vs-AI 抽象战斗驱动器 + 双阵营播种（舰型配比模板未做）· 🟡 S8 投票已做、extend 追加目标/抬威胁未做 · ⬜ S9/S10 延后。
 >
+> **后续（2026-10-09）：** S9 已由 next_phase 的 N6 实现（简报、分级催促、封锁舰队）；S10 的岗位部分由 N1 实现（纯战役旗舰预设、8 个岗位），损管部分改由 N3「致命系统」和待做的 N2 承担。后续进度以 `feature_nsv_next_phase.md` 为准，现有功能总览见 `nsv_feature_overview.md`。
+>
 > **2026-10-02 代码审查修复：** campaign 规则改为「读用 `ActiveCampaigns`、改用 `LiveCampaigns`（回合进行中且未收束）」——换局清理删旗舰/敌舰不再误判失败或计分；延长回合改为组件上的倒计时（CVar `nsv.campaign.extension_duration`，默认 3600s）随规则消亡，旧的 `Timer.Spawn` 会结束下一局；投票回调先校验规则仍存活，规则结束时取消未完成投票；所有收束路径统一置 `Phase=Ended` 并刷新面板；威胁增长走带下限的统一入口；跳到 Home 也计一次跳跃；删除无用的 `Briefing` / `Failed` / `Override` 枚举。战略层：生成间隔 ≤0 不再 NaN、生成序列化失败丢弃记录、丢失 grid 的 Live 记录降级 Missing 不再冻结抽象战斗、战斗只遍历驻留舰。
 >
 > **跨步骤遗留（非某一步的验收项）：** G7 `FuelCost` 仍只显示不扣除；「全目标→投票」与「Home 返航（有分数门禁）」两条胜利路径未互斥、投票路径不看分数；旗舰只能 admin verb 指定（无玩家主船自动进场）；击毁计分不判击杀者/阵营；campaign 目标仅 `PerformJumps` 一种。
