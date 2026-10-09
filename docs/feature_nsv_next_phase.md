@@ -37,7 +37,7 @@
 
 #### N1. 开局全员在旗舰出生 + 战舰岗位与权限
 
-> **实现状态：🟡 测试版已实现（2026-10-08），纯 YAML，不改 C#。** 用户定：纯战役、旗舰用 jupiterG、岗位先只有舰长和船员。
+> **实现状态：🟡 测试版已实现（2026-10-08），纯 YAML，不改 C#；2026-10-09 用户游戏内验证通过（开局出生、门禁、导航台、跃迁核心和电力都能用）。** 用户定：纯战役、旗舰用 jupiterG、岗位先只有舰长和船员。Debug 构建下开发配置（development.toml）会把 game.map 设成 NFDev，需先 `forcemap NsvJupiterG`。
 > - **新预设 `MonoNsvFlagship`（别名 `nsvflagship`）**：只有 `NsvCampaign` 规则，`supportedMaps: NsvFlagshipMapPool` 强制用旗舰地图；不带 NFAdventure（前哨站、船坞、买船）和各种事件调度器。旧的 `MonoNsvCampaign`（NFAdventure + campaign）保持不动。
 > - **游戏地图 `NsvJupiterG`**（`Resources/Prototypes/_NSV/Maps/flagship.yml`）：`isGrid: true` 加载 jupiterG 这个单网格，关闭随机旋转和偏移；`gridComponents` 直接给船加 IFF 和 `NsvCampaignFlagship`，**自动成为 campaign 旗舰**，不再需要管理员 verb。站点 key 必须是船上 `BecomesStation` 的 `Jupiter`。
 > - **站点 `NsvFlagshipStation`**：继承基础站点、岗位出生、船员记录、扇区服务（缺了扇区服务，银行和记录会静默失效）。
