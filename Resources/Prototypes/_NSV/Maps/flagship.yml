@@ -32,6 +32,12 @@
       - type: StationJobs
         availableJobs:
           NsvCaptain: [ 1, 1 ]
+          NsvBridgeOfficer: [ 2, 2 ]
+          NsvGunner: [ 3, 3 ]
+          NsvMunitionsTechnician: [ 2, 2 ]
+          NsvChiefEngineer: [ 1, 1 ]
+          NsvEngineer: [ 3, 3 ]
+          NsvMedicalOfficer: [ 2, 2 ]
           NsvCrew: [ -1, -1 ]
 
 # Jobs + spawning, crew records, and the sector services (bank, records, alert levels). Without the

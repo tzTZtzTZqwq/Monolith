@@ -1,6 +1,9 @@
-# N1: the flagship crew for the pure-campaign preset (MonoNsvFlagship). Two jobs for testing: one
-# captain and an open crew roster. No playtime requirements yet. jupiterG's doors use pirate
-# access (Pirate, plus GrandVizier on the captain's hatch), so the jobs carry those.
+# N1: the flagship crew for the pure-campaign preset (MonoNsvFlagship). No playtime requirements yet.
+# Doors aren't split by department yet (option A): jupiterG's doors use pirate access (Pirate, plus
+# GrandVizier on the captain's hatch), so every job carries Pirate; jobs differ by gear, spawn point
+# and duties. Engineering and medical also get their department access groups for APCs, lockers etc.
+
+# --- Command -------------------------------------------------------------------------------------
 
 - type: job
   id: NsvCaptain
@@ -24,6 +27,125 @@
   - PDVCommand
 
 - type: job
+  id: NsvBridgeOfficer
+  name: job-name-nsv-bridge-officer
+  description: job-description-nsv-bridge-officer
+  playTimeTracker: JobNsvBridgeOfficer
+  startingGear: NsvBridgeOfficerGear
+  alwaysUseSpawner: true
+  icon: "JobIconPilot"
+  supervisors: job-supervisors-nsv-captain
+  canBeAntag: false
+  setPreference: true
+  weight: 15
+  displayWeight: 15
+  accessGroups:
+  - GeneralAccess
+  access:
+  - Pirate
+
+# --- Weapons -------------------------------------------------------------------------------------
+
+- type: job
+  id: NsvGunner
+  name: job-name-nsv-gunner
+  description: job-description-nsv-gunner
+  playTimeTracker: JobNsvGunner
+  startingGear: NsvGunnerGear
+  alwaysUseSpawner: true
+  icon: "JobIconSecurityOfficer"
+  supervisors: job-supervisors-nsv-captain
+  canBeAntag: false
+  setPreference: true
+  weight: 14
+  displayWeight: 14
+  accessGroups:
+  - GeneralAccess
+  access:
+  - Pirate
+
+- type: job
+  id: NsvMunitionsTechnician
+  name: job-name-nsv-munitions-technician
+  description: job-description-nsv-munitions-technician
+  playTimeTracker: JobNsvMunitionsTechnician
+  startingGear: NsvMunitionsTechnicianGear
+  alwaysUseSpawner: true
+  icon: "JobIconWarden"
+  supervisors: job-supervisors-nsv-captain
+  canBeAntag: false
+  setPreference: true
+  weight: 13
+  displayWeight: 13
+  accessGroups:
+  - GeneralAccess
+  access:
+  - Pirate
+
+# --- Engineering ---------------------------------------------------------------------------------
+
+- type: job
+  id: NsvChiefEngineer
+  name: job-name-nsv-chief-engineer
+  description: job-description-nsv-chief-engineer
+  playTimeTracker: JobNsvChiefEngineer
+  startingGear: NsvChiefEngineerGear
+  alwaysUseSpawner: true
+  icon: "JobIconChiefEngineer"
+  supervisors: job-supervisors-nsv-captain
+  canBeAntag: false
+  setPreference: true
+  weight: 12
+  displayWeight: 12
+  accessGroups:
+  - GeneralAccess
+  - Engineering
+  access:
+  - Pirate
+
+- type: job
+  id: NsvEngineer
+  name: job-name-nsv-engineer
+  description: job-description-nsv-engineer
+  playTimeTracker: JobNsvEngineer
+  startingGear: NsvEngineerGear
+  alwaysUseSpawner: true
+  icon: "JobIconStationEngineer"
+  supervisors: job-supervisors-nsv-chief-engineer
+  canBeAntag: false
+  setPreference: true
+  weight: 11
+  displayWeight: 11
+  accessGroups:
+  - GeneralAccess
+  - Engineering
+  access:
+  - Pirate
+
+# --- Medical -------------------------------------------------------------------------------------
+
+- type: job
+  id: NsvMedicalOfficer
+  name: job-name-nsv-medical-officer
+  description: job-description-nsv-medical-officer
+  playTimeTracker: JobNsvMedicalOfficer
+  startingGear: NsvMedicalOfficerGear
+  alwaysUseSpawner: true
+  icon: "JobIconMedicalDoctor"
+  supervisors: job-supervisors-nsv-captain
+  canBeAntag: false
+  setPreference: true
+  weight: 10
+  displayWeight: 10
+  accessGroups:
+  - GeneralAccess
+  - Medical
+  access:
+  - Pirate
+
+# --- General -------------------------------------------------------------------------------------
+
+- type: job
   id: NsvCrew
   name: job-name-nsv-crew
   description: job-description-nsv-crew
@@ -34,12 +156,14 @@
   supervisors: job-supervisors-nsv-captain
   canBeAntag: false
   setPreference: true
-  weight: 10
-  displayWeight: 10
+  weight: 5
+  displayWeight: 5
   accessGroups:
   - GeneralAccess
   access:
   - Pirate
+
+# --- Starting gear -------------------------------------------------------------------------------
 
 - type: startingGear
   id: NsvCaptainGear
@@ -52,6 +176,71 @@
     id: CaptainPDA
 
 - type: startingGear
+  id: NsvBridgeOfficerGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitHoP
+    shoes: ClothingShoesBootsJack
+    ears: ClothingHeadsetCommand
+    back: ClothingBackpack
+    id: HoPPDA
+
+- type: startingGear
+  id: NsvGunnerGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitSec
+    shoes: ClothingShoesBootsJack
+    ears: ClothingHeadsetSecurity
+    back: ClothingBackpackSecurity
+    id: SecurityPDA
+
+- type: startingGear
+  id: NsvMunitionsTechnicianGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitWarden
+    shoes: ClothingShoesBootsWork
+    gloves: ClothingHandsGlovesColorYellow
+    ears: ClothingHeadsetSecurity
+    back: ClothingBackpackSecurity
+    belt: ClothingBeltUtilityFilled
+    id: WardenPDA
+
+- type: startingGear
+  id: NsvChiefEngineerGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitChiefEngineer
+    head: ClothingHeadHatHardhatYellow
+    shoes: ClothingShoesBootsWork
+    gloves: ClothingHandsGlovesColorYellow
+    eyes: ClothingEyesGlassesMeson
+    ears: ClothingHeadsetCE
+    back: ClothingBackpackEngineering
+    belt: ClothingBeltUtilityEngineering
+    id: CEPDA
+
+- type: startingGear
+  id: NsvEngineerGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitEngineering
+    head: ClothingHeadHatHardhatYellow
+    shoes: ClothingShoesBootsWork
+    gloves: ClothingHandsGlovesColorYellow
+    ears: ClothingHeadsetEngineering
+    back: ClothingBackpackEngineering
+    belt: ClothingBeltUtilityEngineering
+    id: EngineerPDA
+
+- type: startingGear
+  id: NsvMedicalOfficerGear
+  equipment:
+    jumpsuit: ClothingUniformJumpsuitMedicalDoctor
+    shoes: ClothingShoesColorWhite
+    gloves: ClothingHandsGlovesLatex
+    ears: ClothingHeadsetMedical
+    back: ClothingBackpackMedical
+    belt: ClothingBeltMedicalFilled
+    id: MedicalPDA
+
+- type: startingGear
   id: NsvCrewGear
   equipment:
     jumpsuit: ClothingUniformJumpsuitColorGrey
@@ -60,8 +249,28 @@
     back: ClothingBackpack
     id: PassengerPDA
 
+# --- Play time trackers --------------------------------------------------------------------------
+
 - type: playTimeTracker
   id: JobNsvCaptain
+
+- type: playTimeTracker
+  id: JobNsvBridgeOfficer
+
+- type: playTimeTracker
+  id: JobNsvGunner
+
+- type: playTimeTracker
+  id: JobNsvMunitionsTechnician
+
+- type: playTimeTracker
+  id: JobNsvChiefEngineer
+
+- type: playTimeTracker
+  id: JobNsvEngineer
+
+- type: playTimeTracker
+  id: JobNsvMedicalOfficer
 
 - type: playTimeTracker
   id: JobNsvCrew
@@ -75,4 +284,10 @@
   primary: true
   roles:
   - NsvCaptain
+  - NsvBridgeOfficer
+  - NsvGunner
+  - NsvMunitionsTechnician
+  - NsvChiefEngineer
+  - NsvEngineer
+  - NsvMedicalOfficer
   - NsvCrew

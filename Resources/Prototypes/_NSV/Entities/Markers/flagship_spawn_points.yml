@@ -22,3 +22,70 @@
   - type: Sprite
     sprite: Structures/Decoration/banner.rsi
     state: banner-blue
+
+# Department spawn points, placed in jupiterG next to the matching station beacons.
+- type: entity
+  id: SpawnPointNsvBridgeOfficer
+  parent: SpawnPointJobBase
+  name: NSV bridge officer
+  components:
+  - type: SpawnPoint
+    job_id: NsvBridgeOfficer
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-blue
+
+- type: entity
+  id: SpawnPointNsvGunner
+  parent: SpawnPointJobBase
+  name: NSV tactical officer
+  components:
+  - type: SpawnPoint
+    job_id: NsvGunner
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-red
+
+- type: entity
+  id: SpawnPointNsvMunitionsTechnician
+  parent: SpawnPointJobBase
+  name: NSV munitions technician
+  components:
+  - type: SpawnPoint
+    job_id: NsvMunitionsTechnician
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-red
+
+- type: entity
+  id: SpawnPointNsvChiefEngineer
+  parent: SpawnPointJobBase
+  name: NSV chief engineer
+  components:
+  - type: SpawnPoint
+    job_id: NsvChiefEngineer
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-yellow
+
+- type: entity
+  id: SpawnPointNsvEngineer
+  parent: SpawnPointJobBase
+  name: NSV engineer
+  components:
+  - type: SpawnPoint
+    job_id: NsvEngineer
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-yellow
+
+- type: entity
+  id: SpawnPointNsvMedicalOfficer
+  parent: SpawnPointJobBase
+  name: NSV medical officer
+  components:
+  - type: SpawnPoint
+    job_id: NsvMedicalOfficer
+  - type: Sprite
+    sprite: Structures/Decoration/banner.rsi
+    state: banner-green

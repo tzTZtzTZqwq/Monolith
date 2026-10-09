@@ -41,8 +41,8 @@
 > - **新预设 `MonoNsvFlagship`（别名 `nsvflagship`）**：只有 `NsvCampaign` 规则，`supportedMaps: NsvFlagshipMapPool` 强制用旗舰地图；不带 NFAdventure（前哨站、船坞、买船）和各种事件调度器。旧的 `MonoNsvCampaign`（NFAdventure + campaign）保持不动。
 > - **游戏地图 `NsvJupiterG`**（`Resources/Prototypes/_NSV/Maps/flagship.yml`）：`isGrid: true` 加载 jupiterG 这个单网格，关闭随机旋转和偏移；`gridComponents` 直接给船加 IFF 和 `NsvCampaignFlagship`，**自动成为 campaign 旗舰**，不再需要管理员 verb。站点 key 必须是船上 `BecomesStation` 的 `Jupiter`。
 > - **站点 `NsvFlagshipStation`**：继承基础站点、岗位出生、船员记录、扇区服务（缺了扇区服务，银行和记录会静默失效）。
-> - **岗位**（`Resources/Prototypes/_NSV/Roles/Jobs/flagship_jobs.yml`，部门 `NsvFlagship`）：`NsvCaptain` 1 人（AllAccess + General + Pirate + GrandVizier + PDVCommand），`NsvCrew` 不限（General + Pirate）；都不设游玩时长要求。权限按 jupiterG 原有的海盗门禁配，不改门。
-> - **出生点**：新增 `SpawnPointNsvCaptain` / `SpawnPointNsvCrew`；jupiterG 上原来的 2 个海盗船长点换成舰长点，6 个海盗 + 6 个大副点合并成 12 个船员点，位置不动；保留原有的 1 个 late-join 点。
+> - **岗位**（`Resources/Prototypes/_NSV/Roles/Jobs/flagship_jobs.yml`，部门 `NsvFlagship`，2026-10-09 扩充到 8 个）：舰长 `NsvCaptain` 1、舰桥军官 `NsvBridgeOfficer` 2、战术军官 `NsvGunner` 3、军械技师 `NsvMunitionsTechnician` 2、总工程师 `NsvChiefEngineer` 1、工程师 `NsvEngineer` 3、医疗官 `NsvMedicalOfficer` 2、船员 `NsvCrew` 不限。门禁先不分区（方案 A）：全员带 General + Pirate，舰长另有 AllAccess + GrandVizier + PDVCommand，工程和医疗另带本部门权限组；岗位之间只区分装备、出生点和职责。都不设游玩时长要求。第二批（大副、军需官、陆战队、科研、厨师）等对应玩法做出来再加。
+> - **出生点**：新增 `SpawnPointNsvCaptain` / `SpawnPointNsvCrew`；jupiterG 上原来的 2 个海盗船长点换成舰长点，6 个海盗 + 6 个大副点合并成 12 个船员点，位置不动；保留原有的 1 个 late-join 点。 新岗位的出生点按位置信标放（脚本沿可走的地板从信标出发找最近的空地板）：舰桥军官 2 和炮手 2 在 Bridge 信标，炮手 1 在 ServerRoom（火炮服务器机房），军械技师 2 在 Brig，总工程师 1 和工程师 2 在 Engineering，工程师 1 在 AME，医疗官 2 在 Medical。
 > - **测试**：`NsvFlagshipGameMapTest`（按游戏地图加载后成为站点、两个岗位和名额、自动旗舰和 IFF、各岗位都有出生点）、`NsvJupiterGMapTest`（地图加载无错误、跃迁核心/控制台/导航台各一台）。
 > - **已知限制**：服务器设置了 `game.map` 会覆盖预设的地图选择；世界生成仍会在船附近放小行星等杂物；没有撤离船，回合靠 campaign 规则结束。岗位、装备、游玩时长要求都是测试版，之后再细化。
 - **参考：** 25 JOB-001/005/007，22 SEC-012。

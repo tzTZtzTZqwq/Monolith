@@ -16,12 +16,26 @@ namespace Content.IntegrationTests.Tests.GameRules;
 /// <summary>
 /// N1: the pure-campaign preset's round map. Loading NsvJupiterG the way the game ticker does turns
 /// the jupiterG grid into the station, auto-marks it as the campaign flagship with an IFF, offers the
-/// two flagship jobs, and provides a round-start spawn point for each of them plus a late-join point.
+/// flagship jobs with their slot counts, and provides a round-start spawn point for every job plus a
+/// late-join point.
 /// </summary>
 [TestFixture]
 public sealed class NsvFlagshipGameMapTest
 {
     private const string GameMap = "NsvJupiterG";
+
+    // Round-start slots per flagship job; null = unlimited.
+    private static readonly Dictionary<string, int?> ExpectedSlots = new()
+    {
+        ["NsvCaptain"] = 1,
+        ["NsvBridgeOfficer"] = 2,
+        ["NsvGunner"] = 3,
+        ["NsvMunitionsTechnician"] = 2,
+        ["NsvChiefEngineer"] = 1,
+        ["NsvEngineer"] = 3,
+        ["NsvMedicalOfficer"] = 2,
+        ["NsvCrew"] = null,
+    };
 
     [Test]
     public async Task FlagshipMapBecomesStationWithJobsAndSpawns()
@@ -50,9 +64,9 @@ public sealed class NsvFlagshipGameMapTest
             var slots = jobs.GetJobs(station!.Value);
             Assert.Multiple(() =>
             {
-                Assert.That(slots.Keys.Select(job => job.Id), Is.EquivalentTo(new[] { "NsvCaptain", "NsvCrew" }));
-                Assert.That(slots["NsvCaptain"], Is.EqualTo(1), "one captain");
-                Assert.That(slots["NsvCrew"], Is.Null, "unlimited crew");
+                Assert.That(slots.Keys.Select(job => job.Id), Is.EquivalentTo(ExpectedSlots.Keys));
+                foreach (var (job, count) in ExpectedSlots)
+                    Assert.That(slots[job], Is.EqualTo(count), $"{job} slots");
                 Assert.That(entityManager.HasComponent<NsvCampaignFlagshipComponent>(ship), Is.True,
                     "the ship is the campaign flagship without admin setup");
                 Assert.That(entityManager.HasComponent<IFFComponent>(ship), Is.True);
@@ -69,10 +83,11 @@ public sealed class NsvFlagshipGameMapTest
             }
             Assert.Multiple(() =>
             {
-                Assert.That(jobSpawns.Count(s => s.SpawnType == SpawnPointType.Job && s.Job == "NsvCaptain"),
-                    Is.GreaterThan(0), "captain spawn point");
-                Assert.That(jobSpawns.Count(s => s.SpawnType == SpawnPointType.Job && s.Job == "NsvCrew"),
-                    Is.GreaterThan(0), "crew spawn point");
+                foreach (var job in ExpectedSlots.Keys)
+                {
+                    Assert.That(jobSpawns.Count(s => s.SpawnType == SpawnPointType.Job && s.Job == job),
+                        Is.GreaterThan(0), $"{job} spawn point");
+                }
                 Assert.That(jobSpawns.Count(s => s.SpawnType == SpawnPointType.LateJoin),
                     Is.GreaterThan(0), "late-join spawn point");
             });
