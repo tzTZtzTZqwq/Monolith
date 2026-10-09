@@ -31719,7 +31719,10 @@ entities:
       pos: -7.5,22.5
       parent: 1
     - type: DeviceList
-      devices: []
+      devices:
+      - 14685
+      - 14692
+      - 14823
     - type: DeviceLinkSource
       linkedPorts: {}
   - uid: 14922

@@ -345,6 +345,117 @@ public sealed class NsvCampaignRuleTest
     }
 
     /// <summary>
+    ///     A critical system aboard the flagship (the jump core) that goes unpowered starts the
+    ///     countdown; restoring power before the grace runs out cancels it and the campaign carries on.
+    /// </summary>
+    [Test]
+    public async Task CriticalSystemRestoredInTimeKeepsCampaign()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var campaign = entityManager.System<NsvCampaignRuleSystem>();
+        var power = entityManager.System<Content.Shared.Power.EntitySystems.SharedPowerReceiverSystem>();
+        var testMap = await pair.CreateTestMap();
+        var ruleUid = EntityUid.Invalid;
+        var core = EntityUid.Invalid;
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(gameTicker.StartGameRule("NsvCampaign", out ruleUid), Is.True);
+            campaign.SetFlagship(testMap.Grid.Owner);
+
+            // The real jump core, with the grace cut to 3 s. No APC on the test grid: it's unpowered.
+            core = entityManager.SpawnEntity("NSVBluespaceDriveCore", testMap.GridCoords);
+            entityManager.GetComponent<NsvCampaignCriticalSystemComponent>(core).GracePeriod = 3f;
+        });
+
+        await pair.RunSeconds(1.5f);
+        await server.WaitAssertion(() =>
+        {
+            var state = entityManager.GetComponent<NsvCampaignRuleComponent>(ruleUid).CriticalSystems["JumpCore"];
+            Assert.That(state.OfflineTime, Is.GreaterThan(0f), "an unpowered core counts down");
+            Assert.That(campaign.GetOutcome(), Is.EqualTo(NsvCampaignOutcome.None));
+            power.SetNeedsPower(core, false);
+        });
+
+        // Well past the original 3 s grace; power came back in time (the solver ticks every 0.5 s).
+        await pair.RunSeconds(3f);
+        await server.WaitAssertion(() =>
+        {
+            var state = entityManager.GetComponent<NsvCampaignRuleComponent>(ruleUid).CriticalSystems["JumpCore"];
+            Assert.Multiple(() =>
+            {
+                Assert.That(state.OfflineTime, Is.Null, "restored power clears the countdown");
+                Assert.That(campaign.GetOutcome(), Is.EqualTo(NsvCampaignOutcome.None));
+                Assert.That(gameTicker.RunLevel, Is.EqualTo(GameRunLevel.InRound));
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
+    ///     Destroying the flagship's only critical system of a group and leaving it that way past the
+    ///     grace period loses the campaign and ends the round.
+    /// </summary>
+    [Test]
+    public async Task CriticalSystemDestroyedPastGraceLosesCampaign()
+    {
+        await using var pair = await PoolManager.GetServerClient(new PoolSettings
+        {
+            Dirty = true,
+            DummyTicker = false
+        });
+        var server = pair.Server;
+        await server.WaitIdleAsync();
+
+        var entityManager = server.ResolveDependency<IEntityManager>();
+        var gameTicker = entityManager.System<GameTicker>();
+        var campaign = entityManager.System<NsvCampaignRuleSystem>();
+        var testMap = await pair.CreateTestMap();
+        var system = EntityUid.Invalid;
+
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(gameTicker.StartGameRule("NsvCampaign"), Is.True);
+            campaign.SetFlagship(testMap.Grid.Owner);
+
+            // No power receiver: online for as long as it exists.
+            system = entityManager.SpawnEntity(null, testMap.GridCoords);
+            var critical = entityManager.AddComponent<NsvCampaignCriticalSystemComponent>(system);
+            critical.Group = "TestSystem";
+            critical.GracePeriod = 1f;
+        });
+
+        await pair.RunSeconds(1.5f);
+        await server.WaitAssertion(() =>
+        {
+            Assert.That(campaign.GetOutcome(), Is.EqualTo(NsvCampaignOutcome.None), "an intact system keeps the campaign");
+            entityManager.DeleteEntity(system);
+        });
+
+        await pair.RunSeconds(2f);
+        await server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(campaign.GetOutcome(), Is.EqualTo(NsvCampaignOutcome.Defeat));
+                Assert.That(gameTicker.RunLevel, Is.EqualTo(GameRunLevel.PostRound), "the round ends");
+            });
+        });
+
+        await pair.CleanReturnAsync();
+    }
+
+    /// <summary>
     ///     The admin panel's campaign controls: the view reflects live state, score and threat can be
     ///     set and nudged (floored at 0), and the briefing / next reminder can be fired on demand.
     /// </summary>

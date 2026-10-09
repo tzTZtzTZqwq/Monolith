@@ -100,7 +100,7 @@ public sealed partial class NsvCampaignRuleSystem : GameRuleSystem<NsvCampaignRu
             return;
 
         component.ActiveTime += frameTime;
-        if (TickExtension(component, frameTime))
+        if (TickExtension(component, frameTime) || TickCriticalSystems(component, frameTime))
             return;
 
         TickBriefing(component);

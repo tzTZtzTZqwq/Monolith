@@ -65,6 +65,14 @@
 - **成本：** 故障锁定 S，功能降级 M。
 
 #### N3. 结构临界倒计时
+
+> **实现状态：🟡 改为「致命系统」方案（2026-10-09，用户拍板）。** 不做全舰结构度，改成：旗舰上的**跃迁核心被摧毁或断电持续 3 分钟即判负**。做成通用组件 `NsvCampaignCriticalSystemComponent`（`Content.Server/_NSV/GameRule/Components/`），任何原型加上它就成为致命系统：
+> - 字段 `group`（同组互为备份，有一台在线即算在线）、`name`（公告用的名字）、`gracePeriod`（默认 180 秒）。
+> - 逻辑在 `NsvCampaignRuleSystem.Critical.cs`：每 tick 检查旗舰网格（带 `NsvCampaignFlagship` 的网格，或被标记实体所在的网格）上的致命系统；某组没有任何**完好且有电**的成员就累计离线时间。组在第一次出现在旗舰上时登记，所以最后一台被毁后仍会继续倒计时，这期间装上新核心并接电也能解除。
+> - 公告（Naval Command）：持续离线 2 秒后宣布倒计时（避免开局电力还没解算时误报）、剩 60 秒再提醒、恢复时宣布；超时则 `Outcome=Defeat`、公告、结束回合。只在胜负未定（Outcome=None）时生效。
+> - 目前只挂在 `NSVBluespaceDriveCore`（`group: JumpCore`）。原有的「旗舰网格被删除即判负」保留。
+> - 测试：`NsvCampaignRuleTest.CriticalSystemRestoredInTimeKeepsCampaign`、`CriticalSystemDestroyedPastGraceLosesCampaign`。
+> - 原计划的结构度倒计时、舱内随机爆炸未做。
 - **参考：** 03 OMAP-005 / OVERMAP-007，15 DAMCTRL-011，09 COMBAT-018。
 - **NSV13：** 船体结构归零不会立刻沉没，而是进入 15 分钟倒计时，期间舱内随机爆炸；船员把结构修回 20% 以上就能解除。
 - **现状：** `NsvCampaignRuleSystem.OnFlagshipTerminating` 在旗舰实体被删除时立刻判负，没有缓冲。全舰也没有一个整体结构数值。

@@ -68,6 +68,10 @@ public sealed partial class NsvCampaignRuleComponent : Component
     // Last reminder delivered in the current stall, 0–5; wraps back to 1 after the blockade (5).
     [ViewVariables]
     public int ReminderStage;
+
+    // Critical-system countdowns on the flagship, by group (see NsvCampaignCriticalSystemComponent).
+    [ViewVariables]
+    public readonly Dictionary<string, NsvCampaignCriticalState> CriticalSystems = new();
 }
 
 /// <summary>

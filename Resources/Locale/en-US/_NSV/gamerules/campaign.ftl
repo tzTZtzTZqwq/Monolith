@@ -27,3 +27,10 @@ nsv-campaign-reminder-3 = Third notice: your continued inaction is unacceptable.
 nsv-campaign-reminder-4 = Final warning: resume your objectives immediately. { $penalty } victory score has been withheld.
 nsv-campaign-reminder-blockade = Command has lost patience. Enemy forces have been alerted to your position, and a blockade fleet is moving to interdict you.
 nsv-campaign-reminder-blockade-fallback = Command has lost patience. Enemy forces are mobilising against you.
+
+nsv-campaign-critical-default = A critical ship system
+nsv-campaign-critical-jump-core = The bluespace jump core
+nsv-campaign-critical-offline = { $system } is offline! Restore it within { $seconds } seconds or the operation fails.
+nsv-campaign-critical-warning = { $system } is still offline. { $seconds } seconds until the operation fails.
+nsv-campaign-critical-restored = { $system } is back online.
+nsv-campaign-defeat-critical = { $system } stayed offline. The flagship is crippled and the operation has failed.

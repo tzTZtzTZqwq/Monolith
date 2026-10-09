@@ -10,6 +10,11 @@
   - type: NsvBluespaceDrive
     chargingLoad: 15000 # W while charging (matches the CTLA-160 core's original draw)
     idleLoad: 1500 # W once fully charged
+  # Losing it (destroyed or unpowered) for 3 minutes aboard the flagship loses the campaign.
+  - type: NsvCampaignCriticalSystem
+    group: JumpCore
+    name: nsv-campaign-critical-jump-core
+    gracePeriod: 180
   - type: MaterialStorage
     storageLimit: 3000 # 30 plasma sheets
     materialWhiteList: [Plasma]
